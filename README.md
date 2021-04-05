@@ -17,11 +17,14 @@ Known issues:
 - does not compile on < 10.1 - I went a bit fancy with helpers that were broken before
 - exception when calculating complexity but had a test with n=0 
 
-
 The content of the README is mostly copied from the Google Benchmark project with some first modifications to show the correct Syntax in Delphi.
 
 I developed and tested with Delphi 10.4.2 but I am aiming to target XE7 and higher. The syntax for the benchmark code is using inline variables.
 If on an older version the loop variable needs to be of type `TState.TValue`. I tested on Windows 10 but it should run on all Windows versions Delphi supports. At some point I might add Linux support. Not sure about other platforms though.
+
+Please feel free to open issues for questions or bugs you encounter. Happy benchmarking!
+
+
 
 A library to benchmark code snippets, similar to unit tests. Example:
 
