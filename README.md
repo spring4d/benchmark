@@ -2,6 +2,18 @@
 
 Delphi port of [Google Benchmark](https://github.com/google/benchmark)
 
+Hello everyone - you are amongst the few selected people to get a preview to help test things out and give some feedback, welcome!
+
+This readme is WIP - most features are implemented and working - currently missing:
+
+- file output
+- multithreaded testing
+
+The content of the README is mostly copied from the Google Benchmark project with some first modifications to show the correct Syntax in Delphi.
+
+I developed and tested with Delphi 10.4.2 but I am aiming to target XE7 and higher. The syntax for the benchmark code is using inline variables.
+If on an older version the loop variable needs to be of type `TState.TValue`. I tested on Windows 10 but it should run on all Windows versions Delphi supports. At some point I might add Linux support. Not sure about other platforms though.
+
 A library to benchmark code snippets, similar to unit tests. Example:
 
 ```delphi
@@ -27,10 +39,6 @@ end.
 ```
 
 To get started, simply add `Spring.Benchmark` to the uses.
-
-### Resources
-
-[Discussion group](https://groups.google.com/g/spring4d)
 
 ## Requirements
 
