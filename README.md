@@ -12,6 +12,12 @@ This readme is WIP - most features are implemented and working - currently missi
 - file output
 - multithreaded testing
 
+Known issues:
+
+- does not compile on < 10.1 - I went a bit fancy with helpers that were broken before
+- exception when calculating complexity but had a test with n=0 
+
+
 The content of the README is mostly copied from the Google Benchmark project with some first modifications to show the correct Syntax in Delphi.
 
 I developed and tested with Delphi 10.4.2 but I am aiming to target XE7 and higher. The syntax for the benchmark code is using inline variables.
