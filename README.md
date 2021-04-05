@@ -4,6 +4,9 @@ Delphi port of [Google Benchmark](https://github.com/google/benchmark)
 
 Hello everyone - you are amongst the few selected people to get a preview to help test things out and give some feedback, welcome!
 
+The goal of this project is to provide a powerful benchmarking library for Delphi developers and stay as close as possible to its origin.
+That means I will be reluctant to add a lot of features but aim at making work what works with its origin.
+
 This readme is WIP - most features are implemented and working - currently missing:
 
 - file output
