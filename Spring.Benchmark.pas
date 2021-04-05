@@ -593,7 +593,7 @@ var
   // Display the result of each benchmark repetitions. When 'true' is specified
   // only the mean, standard deviation, and other statistics are displayed for
   // repeated benchmarks. Unlike benchmark_report_aggregates_only, only affects
-  // the display reporter, but  *NOT* file reporter, which will still contain
+  // the display reporter, but *NOT* file reporter, which will still contain
   // all the output.
   benchmark_display_aggregates_only: Boolean = False;
 
@@ -621,6 +621,9 @@ var
   // The level of verbose logging to output
   log_level: Integer = 0;
 
+  // separator used for the csv file
+  csv_separator: Char = ';';
+
 {$ENDREGION}
 
 implementation
@@ -629,6 +632,7 @@ uses
 {$IFDEF MSWINDOWS}
   Winapi.Windows,
 {$ENDIF}
+  System.Classes,
   System.Character,
   System.DateUtils,
   System.Math,
@@ -726,8 +730,8 @@ type
       const noRepetitionIndex = -1;
       type TRunType = (rtIteration, rtAggregate);
 
+    strict private
       function GetBenchmarkName: string;
-      property BenchmarkName: string read GetBenchmarkName;
     public
       runName: TBenchmarkName;
       runType: TRunType;
@@ -757,11 +761,16 @@ type
       class function Create: TRun; static;
       function GetAdjustedRealTime: Double;
       function GetAdjustedCPUTime: Double;
+      property BenchmarkName: string read GetBenchmarkName;
     end;
+  strict protected
+    fOutputStream: TStream;
   public
     function ReportContext(const context: TContext): Boolean; virtual; abstract;
     procedure ReportRuns(const reports: TArray<TRun>); virtual; abstract;
     procedure PrintBasicContext(var output: Text; const context: TContext);
+
+    property OutputStream: TStream write fOutputStream;
   end;
 
   TConsoleReporter = class(TBenchmarkReporter)
@@ -783,6 +792,16 @@ type
     fPrintedHeader: Boolean;
     procedure PrintRunData(const result: TBenchmarkReporter.TRun);
     procedure PrintHeader(const run: TBenchmarkReporter.TRun);
+  public
+    function ReportContext(const context: TBenchmarkReporter.TContext): Boolean; override;
+    procedure ReportRuns(const reports: TArray<TBenchmarkReporter.TRun>); override;
+  end;
+
+  TCSVReporter = class(TBenchmarkReporter)
+  private
+    fPrintedHeader: Boolean;
+    fUserCounterNames: TArray<string>;
+    procedure PrintRunData(const run: TBenchmarkReporter.TRun);
   public
     function ReportContext(const context: TBenchmarkReporter.TContext): Boolean; override;
     procedure ReportRuns(const reports: TArray<TBenchmarkReporter.TRun>); override;
@@ -2144,14 +2163,13 @@ begin
     Result := TConsoleReporter.Create
 //  } else if (name == "json") {
 //    return PtrType(new JSONReporter);
-//  } else if (name == "csv") {
-//    return PtrType(new CSVReporter);
-//  } else {
+  else if name = 'csv' then
+    Result := TCSVReporter.Create
   else
   begin
     Writeln(ErrOutput, 'Unexpected format: "', name, '"');
     Halt(1);
-//    Result := nil;
+    Result := nil;
   end;
 end;
 
@@ -2302,7 +2320,9 @@ function RunSpecifiedBenchmarks(displayReporter,
 var
   spec: string;
   benchmarks: TArray<TBenchmarkInstance>;
-  defaultDisplayReporter: TBenchmarkReporter;
+  defaultDisplayReporter, defaultFileReporter: TBenchmarkReporter;
+  fileName: string;
+  outputFile: TStream;
   i: Integer;
 begin
   spec := benchmark_filter;
@@ -2310,37 +2330,40 @@ begin
     spec := '.';  // Regexp that matches all benchmarks
 
   // Setup the reporters
-//  std::unique_ptr<BenchmarkReporter> default_display_reporter;
-//  std::unique_ptr<BenchmarkReporter> default_file_reporter;
+  defaultDisplayReporter := nil;
+  defaultFileReporter := nil;
+
   if displayReporter = nil then
   begin
     defaultDisplayReporter := CreateReporter(benchmark_format, GetOutputOptions());
     displayReporter := defaultDisplayReporter;
-  end
-  else
-    defaultDisplayReporter := nil;
+  end;
 
-//  std::string const& fname = FLAGS_benchmark_out;
-//  if (fname.empty() && file_reporter) {
-//    Err << "A custom file reporter was provided but "
-//           "--benchmark_out=<file> was not specified."
-//        << std::endl;
-//    std::exit(1);
-//  }
-//  if (!fname.empty()) {
-//    output_file.open(fname);
+  fileName := benchmark_out;
+  if (fileName = '') and (fileReporter <> nil) then
+  begin
+    Writeln(ErrOutput, 'A custom file reporter was provided but ' +
+                       '--benchmark_out=<file> was not specified.');
+    Halt(1);
+  end;
+
+  if fileName <> '' then
+  begin
+    outputFile := TFileStream.Create(fileName, fmCreate, fmShareDenyWrite);
 //    if (!output_file.is_open()) {
 //      Err << "invalid file name: '" << fname << "'" << std::endl;
 //      std::exit(1);
 //    }
-//    if (!file_reporter) {
-//      default_file_reporter = internal::CreateReporter(
-//          FLAGS_benchmark_out_format, ConsoleReporter::OO_None);
-//      file_reporter = default_file_reporter.get();
-//    }
-//    file_reporter->SetOutputStream(&output_file);
-//    file_reporter->SetErrorStream(&output_file);
-//  }
+    if fileReporter = nil then
+    begin
+      defaultFileReporter := CreateReporter(benchmark_out_format, []);
+      fileReporter := defaultFileReporter;
+    end;
+
+    fileReporter.OutputStream := outputFile;
+  end
+  else
+    outputFile := nil;
 
   if not TBenchmarkFamilies.FindBenchmarks(spec, benchmarks, ErrOutput) then Exit(0);
 
@@ -2357,6 +2380,8 @@ begin
     RunBenchmarks(benchmarks, displayReporter, fileReporter);
 
   defaultDisplayReporter.Free;
+  defaultFileReporter.Free;
+  outputFile.Free;
 
   Result := Length(benchmarks);
 end;
@@ -2407,19 +2432,23 @@ var
   results: ^TThreadManager.TResult;
 begin
   timer := TThreadTimer.Create(benchmark.measureProcessCpuTime);
-  st := benchmark.Run(iters, threadId, timer, manager);
+  try
+    st := benchmark.Run(iters, threadId, timer, manager);
 //  CHECK(st.error_occurred() || st.iterations() >= st.max_iterations)
 //      << "Benchmark returned before State::KeepRunning() returned false!";
 
-  results := @manager.results;
-  results.iterations := results.iterations + st.iterations;
-  results.cpuTimeUsed := results.cpuTimeUsed + timer.CpuTimeUsed;
-  results.realTimeUsed := results.realTimeUsed + timer.RealTimeUsed;
-  results.manualTimeUsed := results.manualTimeUsed + timer.ManualTimeUsed;
-  results.complexityN := results.complexityN + st.ComplexityN;
-  Increment(results.counters, st.fCounters);
+    results := @manager.results;
+    results.iterations := results.iterations + st.iterations;
+    results.cpuTimeUsed := results.cpuTimeUsed + timer.CpuTimeUsed;
+    results.realTimeUsed := results.realTimeUsed + timer.RealTimeUsed;
+    results.manualTimeUsed := results.manualTimeUsed + timer.ManualTimeUsed;
+    results.complexityN := results.complexityN + st.ComplexityN;
+    Increment(results.counters, st.fCounters);
 
 //  manager.NotifyThreadComplete;
+  finally
+    timer.Free;
+  end;
 end;
 
 function CreateRunReport(const benchmark: TBenchmarkInstance;
@@ -3525,6 +3554,152 @@ begin
     Write(result.reportLabel);
 
   Writeln;
+end;
+
+{$ENDREGION}
+
+
+{$REGION 'TCSVReporter'}
+
+function TCSVReporter.ReportContext(
+  const context: TBenchmarkReporter.TContext): Boolean;
+begin
+  Result := True;
+end;
+
+const
+  elements: array[0..9] of string = (
+    'name',           'iterations',       'real_time',        'cpu_time',
+    'time_unit',      'bytes_per_second', 'items_per_second', 'label',
+    'error_occurred', 'error_message'
+  );
+
+function CsvEscape(const s: string): string;
+begin
+  Result := AnsiQuotedStr(s, '"');
+end;
+
+type
+  TStreamHelper = class helper for TStream
+    function WriteData(const Buffer: string): NativeInt; overload;
+  end;
+
+function TStreamHelper.WriteData(const Buffer: string): NativeInt;
+begin
+  Result := Write(Pointer(Buffer)^, Length(Buffer) shl 1);
+end;
+
+procedure TCSVReporter.ReportRuns(
+  const reports: TArray<TBenchmarkReporter.TRun>);
+var
+  i, k: Integer;
+begin
+  if not fPrintedHeader then
+  begin
+    // save the names of all the user counters
+    for i := 0 to High(reports) do
+      for k := 0 to High(reports[i].counters) do
+      begin
+        if (reports[i].counters[k].name = 'bytes_per_second') or
+           (reports[i].counters[k].name = 'items_per_second') then
+          Continue;
+        fUserCounterNames := fUserCounterNames + [reports[i].counters[k].name];
+      end;
+
+    // print the header
+    for i := 0 to High(elements) do
+    begin
+      fOutputStream.WriteData(elements[i]);
+      if i < High(elements) then
+        fOutputStream.WriteData(csv_separator);
+    end;
+    for i := 0 to High(fUserCounterNames) do
+      fOutputStream.WriteData(csv_separator + '"' + fUserCounterNames[i] + '"');
+    fOutputStream.WriteData(sLineBreak);
+
+    fPrintedHeader := True;
+  end
+  else
+  begin
+    // check that all the current counters are saved in the name set
+//    for i := 0 to High(reports) do
+//    begin
+//      for k := 0 to High(reports[i].counters) do
+//      begin
+//        if (reports[i].counters[k].name = 'bytes_per_second') or
+//           (reports[i].counters[k].name = 'items_per_second') then
+//          Continue;
+//      end;
+//    end;
+
+//    for (const auto& run : reports) {
+//      for (const auto& cnt : run.counters) {
+//        if (cnt.first == "bytes_per_second" || cnt.first == "items_per_second")
+//          continue;
+//        CHECK(user_counter_names_.find(cnt.first) != user_counter_names_.end())
+//            << "All counters must be present in each run. "
+//            << "Counter named \"" << cnt.first
+//            << "\" was not in a run after being added to the header";
+//      }
+//    }
+
+  end;
+
+  for i := 0 to High(reports) do
+    PrintRunData(reports[i]);
+end;
+
+procedure TCSVReporter.PrintRunData(const run: TBenchmarkReporter.TRun);
+var
+  counter: PCounter;
+  i: Integer;
+begin
+  fOutputStream.WriteData(CsvEscape(run.BenchmarkName) + csv_separator);
+  if run.errorOccured then
+  begin
+    fOutputStream.WriteData((Length(elements) - 3).ToString + csv_separator);
+    fOutputStream.WriteData('true,');
+    fOutputStream.WriteData(CsvEscape(run.errorMessage));
+    fOutputStream.WriteData(sLineBreak);
+    Exit;
+  end;
+
+  // Do not print iteration on bigO and RMS report
+  if not run.reportBigO and not run.reportRms then
+    fOutputStream.WriteData(IntToStr(run.iterations));
+  fOutputStream.WriteData(csv_separator);
+
+  fOutputStream.WriteData(run.GetAdjustedRealTime.ToString + csv_separator);
+  fOutputStream.WriteData(run.GetAdjustedCPUTime.ToString + csv_separator);
+
+  // Do not print timeLabel on bigO and RMS report
+  if run.reportBigO then
+    fOutputStream.WriteData(GetBigOString(run.complexity))
+  else if not run.reportRms then
+    fOutputStream.WriteData(GetTimeUnitString(run.timeUnit));
+  fOutputStream.WriteData(csv_separator);
+
+  counter := run.counters.Find('bytes_per_second');
+  if counter <> nil then
+    fOutputStream.WriteData(counter.value.ToString);
+  fOutputStream.WriteData(csv_separator);
+  counter := run.counters.Find('items_per_second');
+  if counter <> nil then
+    fOutputStream.WriteData(counter.value.ToString);
+  fOutputStream.WriteData(csv_separator);
+  if run.reportLabel <> '' then
+    fOutputStream.WriteData(run.reportLabel);
+  fOutputStream.WriteData(csv_separator + csv_separator);  // for error_occurred and error_message
+
+  // Print user counters
+  for i := 0 to High(fUserCounterNames) do
+  begin
+    counter := run.counters.Find(fUserCounterNames[i]);
+    fOutputStream.WriteData(csv_separator);
+    if counter <> nil then
+      fOutputStream.WriteData(counter.value.ToString);
+  end;
+  fOutputStream.WriteData(sLineBreak);
 end;
 
 {$ENDREGION}
