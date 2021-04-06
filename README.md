@@ -9,7 +9,7 @@ That means I will be reluctant to add a lot of features but aim at making work w
 
 This readme is WIP - most features are implemented and working - currently missing:
 
-- file output
+- file output (csv done, json missing)
 - multithreaded testing
 
 Known issues:
@@ -21,6 +21,8 @@ The content of the README is mostly copied from the Google Benchmark project wit
 
 I developed and tested with Delphi 10.4.2 but I am aiming to target XE7 and higher. The syntax for the benchmark code is using inline variables.
 If on an older version the loop variable needs to be of type `TState.TValue`. I tested on Windows 10 but it should run on all Windows versions Delphi supports. At some point I might add Linux support. Not sure about other platforms though.
+
+I added support for FPC - tested with whatever FPC version comes with Lazarus 2.0.12 on Windows though - support for other platforms missing. I guess Linux will be interesting, not sure about others.
 
 Please feel free to open issues for questions or bugs you encounter. Happy benchmarking!
 
