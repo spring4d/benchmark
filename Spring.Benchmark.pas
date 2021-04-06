@@ -220,13 +220,13 @@ type
     private
       fCached: TIterationCount;
       fParent: ^TState;
-      class var fCurrent: TValue;
+      fCurrent: TValue;
     public
       function MoveNext: Boolean; inline;
     {$IFDEF HAS_RECORD_FINALIZER}
       class operator Finalize(var iter: TStateIterator);
     {$ENDIF}
-      class property Current: TValue read fCurrent;
+      property Current: TValue read fCurrent;
     end;
   strict private
     // When total_iterations_ is 0, KeepRunning() and friends will return false.
@@ -646,6 +646,11 @@ uses
 {$IFDEF MSWINDOWS}
   Winapi.ShLwApi,
   Winapi.Windows,
+{$ELSE}
+  Posix.Stdlib,
+  Posix.SysTime,
+  Posix.Time,
+  Posix.Unistd,
 {$ENDIF}
   System.Classes,
   System.Character,
@@ -821,6 +826,7 @@ type
     procedure PrintRunData(const result: TBenchmarkReporter.TRun);
     procedure PrintHeader(const run: TBenchmarkReporter.TRun);
   public
+    constructor Create(const opts: TOutputOptions);
     function ReportContext(const context: TBenchmarkReporter.TContext): Boolean; override;
     procedure ReportRuns(const reports: TArray<TBenchmarkReporter.TRun>); override;
   end;
@@ -1210,6 +1216,7 @@ type
 
 procedure Write(const msg: string; const args: array of const; color: TColor = clWhite); overload;
 const
+{$IFDEF MSWINDOWS}
   PlatformColorCodes: array[TColor] of Word = (
     FOREGROUND_INTENSITY,
     FOREGROUND_RED,
@@ -1220,6 +1227,10 @@ const
     FOREGROUND_BLUE or FOREGROUND_GREEN,
     FOREGROUND_BLUE or FOREGROUND_GREEN or FOREGROUND_RED or FOREGROUND_INTENSITY
   );
+{$ELSE}
+  PlatformColorCodes: array[TColor] of Char = (#0, '1', '2', '3', '4', '5', '6', '7');
+{$ENDIF}
+{$IFDEF MSWINDOWS}
 var
   stdOutHandle: THandle;
   bufferInfo: TConsoleScreenBufferInfo;
@@ -1247,6 +1258,17 @@ begin
   if oldColorAttributes < 16 then
     SetConsoleTextAttribute(stdOutHandle, oldColorAttributes);
 end;
+{$ELSE}
+var
+  colorCode: string;
+begin
+  colorCode := PlatformColorCodes[color];
+  if colorCode <> #0 then
+    System.Write(Format(#27'[0;3%sm', [colorCode]));
+  System.Write(Format(msg, args) + #27'[m');
+end;
+{$ENDIF}
+
 
 procedure Write(const msg: string; color: TColor = clWhite); inline; overload;
 begin
@@ -1448,8 +1470,8 @@ end;
 
 // ported from: timers.cc and timers.h
 
-function MakeTime(const kernelTime: TFileTime; const userTime: TFileTime): Double;
 {$IFDEF MSWINDOWS}
+function MakeTime(const kernelTime: TFileTime; const userTime: TFileTime): Double;
 var
   kernel, user: ULARGE_INTEGER;
 begin
@@ -1458,8 +1480,13 @@ begin
   user.HighPart := userTime.dwHighDateTime;
   user.LowPart := userTime.dwLowDateTime;
   Result := (kernel.QuadPart + user.QuadPart) * 1e-7;
-{$ENDIF}
 end;
+{$ELSE}
+function MakeTime(const ts: timespec): Double;
+begin
+  Result := ts.tv_sec + (ts.tv_nsec * 1e-9);
+end;
+{$ENDIF}
 
 function ProcessCPUUsage: Double;
 {$IFDEF MSWINDOWS}
@@ -1472,8 +1499,17 @@ begin
     Exit(MakeTime(kernelTime, userTime));
   DiagnoseAndExit('GetProccessTimes() failed');
   Result := 0;
-{$ENDIF}
 end;
+{$ELSE}
+var
+  spec: timespec;
+begin
+  if clock_gettime(CLOCK_PROCESS_CPUTIME_ID, @spec) = 0 then
+    Exit(MakeTime(spec));
+  DiagnoseAndExit('clock_gettime(CLOCK_PROCESS_CPUTIME_ID, ...) failed');
+  Result := 0;
+end;
+{$ENDIF}
 
 function ThreadCPUUsage: Double;
 {$IFDEF MSWINDOWS}
@@ -1486,8 +1522,17 @@ begin
     Exit(MakeTime(kernelTime, userTime));
   DiagnoseAndExit('GetThreadTimes() failed');
   Result := 0;
-{$ENDIF}
 end;
+{$ELSE}
+var
+  ts: timespec;
+begin
+  if clock_gettime(CLOCK_THREAD_CPUTIME_ID, @ts) = 0 then
+    Exit(MakeTime(ts));
+  DiagnoseAndExit('clock_gettime(CLOCK_THREAD_CPUTIME_ID, ...) failed');
+  Result := 0;
+end;
+{$ENDIF}
 
 type
   TClock = record
@@ -1498,16 +1543,29 @@ type
 
 class constructor TClock.Create;
 begin
+{$IFDEF MSWINDOWS}
   QueryPerformanceFrequency(freq);
+{$ELSE}
+  freq := 10000000;
+{$ENDIF}
 end;
 
 class function TClock.Now: Double;
+{$IFDEF MSWINDOWS}
 var
   ticks: Int64;
 begin
   QueryPerformanceCounter(ticks);
   Result := ticks / freq;
 end;
+{$ELSE}
+var
+  res: timespec;
+begin
+  clock_gettime(CLOCK_MONOTONIC, @res);
+  Result := (Int64(1000000000) * res.tv_sec + res.tv_nsec) div 100 div freq;
+end;
+{$ENDIF}
 
 function ChronoClockNow: Double; inline;
 begin
@@ -1529,8 +1587,12 @@ begin
   sysInfo := Default(TSystemInfo);
   GetSystemInfo(sysInfo);
   Result := sysInfo.dwNumberOfProcessors;
-{$ENDIF}
 end;
+{$ELSE}
+begin
+  Result := CPUCount;
+end;
+{$ENDIF}
 
 function GetCPUCyclesPerSecond: Double;
 {$IFDEF MSWINDOWS}
@@ -1566,8 +1628,12 @@ begin
   else
     Result := High(UInt64) - cyclesStart + cyclesStop;
   Result := Result * WaitFactor;
-  {$ENDIF}
 end;
+{$ELSE}
+begin
+  Result := 0;
+end;
+{$ENDIF}
 
 function GetCacheSizes: TArray<TCPUInfo.TCacheInfo>;
 {$IFDEF MSWINDOWS}
@@ -1624,8 +1690,13 @@ begin
   end;
   FreeMem(buff);
   Result := res;
-{$ENDIF}
 end;
+{$ELSE}
+begin
+  Result := nil;
+end;
+{$ENDIF}
+
 
 {$ENDREGION}
 
@@ -2264,7 +2335,7 @@ function CreateReporter(const name: string;
   const opts: TConsoleReporter.TOutputOptions): TBenchmarkReporter;
 begin
   if name = 'console' then
-    Result := TConsoleReporter.Create
+    Result := TConsoleReporter.Create(opts)
 //  } else if (name == "json") {
 //    return PtrType(new JSONReporter);
   else if name = 'csv' then
@@ -2277,40 +2348,44 @@ begin
   end;
 end;
 
+
+
 function IsColorTerminal: Boolean;
+{$IFDEF MSWINDOWS}
 begin
-  {$IFDEF MSWINDOWS}
-  Result := True;
-  {$ELSE}
-//#if BENCHMARK_OS_WINDOWS
 //  // On Windows the TERM variable is usually not set, but the
 //  // console there does support colors.
 //  return 0 != _isatty(_fileno(stdout));
-//#else
-//  // On non-Windows platforms, we rely on the TERM variable. This list of
-//  // supported TERM values is copied from Google Test:
-//  // <https://github.com/google/googletest/blob/master/googletest/src/gtest.cc#L2925>.
-//  const char* const SUPPORTED_TERM_VALUES[] = {
-//      "xterm",         "xterm-color",     "xterm-256color",
-//      "screen",        "screen-256color", "tmux",
-//      "tmux-256color", "rxvt-unicode",    "rxvt-unicode-256color",
-//      "linux",         "cygwin",
-//  };
-//
-//  const char* const term = getenv("TERM");
-//
-//  bool term_supports_color = false;
-//  for (const char* candidate : SUPPORTED_TERM_VALUES) {
-//    if (term && 0 == strcmp(term, candidate)) {
-//      term_supports_color = true;
-//      break;
-//    }
-//  }
-//
-//  return 0 != isatty(fileno(stdout)) && term_supports_color;
-//#endif  // BENCHMARK_OS_WINDOWS
-  {$ENDIF}
+  Result := True;
 end;
+{$ELSE}
+const
+  // On non-Windows platforms, we rely on the TERM variable. This list of
+  // supported TERM values is copied from Google Test:
+  // <https://github.com/google/googletest/blob/master/googletest/src/gtest.cc#L2925>.
+  SupportedTermValues: array[0..10] of string = (
+    'xterm',         'xterm-color',     'xterm-256color',
+    'screen',        'screen-256color', 'tmux',
+    'tmux-256color', 'rxvt-unicode',    'rxvt-unicode-256color',
+    'linux',         'cygwin'
+  );
+var
+  term: string;
+  i: Integer;
+begin
+  term := string(getenv('TERM'));
+
+  Result := False;
+  for i := 0 to High(SupportedTermValues) do
+    if term = SupportedTermValues[i] then
+    begin
+      Result := True;
+      Break;
+    end;
+
+  Result := Result and (isatty(STDOUT_FILENO) <> 0);
+end;
+{$ENDIF}
 
 function GetOutputOptions(const forceNoColor: Boolean = False): TConsoleReporter.TOutputOptions;
 
@@ -3541,6 +3616,11 @@ end;
 
 
 {$REGION 'TConsoleReporter'}
+
+constructor TConsoleReporter.Create(const opts: TOutputOptions);
+begin
+  fOutputOptions := opts;
+end;
 
 function TConsoleReporter.ReportContext(const context: TBenchmarkReporter.TContext): Boolean;
 begin
