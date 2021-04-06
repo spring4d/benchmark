@@ -29,19 +29,30 @@ unit Spring.Benchmark;
 {$T-,X+,H+,B-}
 {$IFNDEF DEBUG}{$O+,W-}{$ENDIF}
 {$INLINE ON}
-{$LEGACYIFEND ON}
-{$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
-{$IF CompilerVersion < 28.0}
-  {$MESSAGE ERROR 'Delphi XE7 or higher required'}
-{$IFEND}
-{$IF CompilerVersion >= 34.0}
-  {$DEFINE HAS_RECORD_FINALIZER}
-{$IFEND}
+{$IFDEF FPC}
+  {$IFOPT D+}{$DEFINE DEBUG}{$ENDIF}
+  {$MODE DELPHI}
+  {$ASMMODE INTEL}
+{$ELSE}
+  {$LEGACYIFEND ON}
+  {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
+  {$DEFINE HAS_UNITSCOPE}
+  {$IF CompilerVersion < 28.0}
+    {$MESSAGE ERROR 'Delphi XE7 or higher required'}
+  {$IFEND}
+  {$IF CompilerVersion >= 34.0}
+    {$DEFINE HAS_RECORD_FINALIZER}
+  {$IFEND}
+{$ENDIF}
 
 interface
 
 uses
+{$IFDEF HAS_UNITSCOPE}
   System.Generics.Collections;
+{$ELSE}
+  Generics.Collections;
+{$ENDIF}
 
 type
   PCounter = ^TCounter;
@@ -91,7 +102,8 @@ const
   kAvgIterationsRate = [kIsRate, kAvgIterations];
 
 type
-  TUserCounters = TArray<record name: string; counter: TCounter end>;
+  TUserCounter = record name: string; counter: TCounter end;
+  TUserCounters = TArray<TUserCounter>;
   TUserCountersHelper = record helper for TUserCounters
     function Find(const name: string): PCounter;
     function Get(const name: string): PCounter;
@@ -99,7 +111,8 @@ type
 
   PCounterStat = ^TCounterStat;
   TCounterStat = record c: TCounter; s: TArray<Double>; end;
-  TCounterStats = TArray<record name: string; counter: TCounterStat end>;
+  TCounterStatsItem = record name: string; counter: TCounterStat end;
+  TCounterStats = TArray<TCounterStatsItem>;
   TCounterStatsHelper = record helper for TCounterStats
     function Find(const name: string): PCounterStat;
     function Get(const name: string): PCounterStat;
@@ -109,7 +122,7 @@ type
 
   TIterationCount = type UInt64;
 
-  TBigOFunc = reference to function(const n: TIterationCount): Double;
+  TBigOFunc = {$IFNDEF FPC}reference to{$ENDIF} function(const n: TIterationCount): Double;
 
   TStatisticsFunc = function(const values: array of Double): Double;
 
@@ -403,7 +416,7 @@ type
   TBenchmark = class
   type
     TRange = record start, limit: Int64 end;
-    TCustomizeFunc = reference to procedure(const benchmark: TBenchmark);
+    TCustomizeFunc = {$IFNDEF FPC}reference to{$ENDIF} procedure(const benchmark: TBenchmark);
   private
     fName: string;
     fAggregationReportMode: TAggregationReportModes;
@@ -629,7 +642,9 @@ var
 implementation
 
 uses
+{$IFDEF HAS_UNITSCOPE}
 {$IFDEF MSWINDOWS}
+  Winapi.ShLwApi,
   Winapi.Windows,
 {$ENDIF}
   System.Classes,
@@ -639,8 +654,21 @@ uses
   System.RegularExpressions,
   System.StrUtils,
   System.SyncObjs,
-  System.SysUtils,
-  Winapi.ShLwApi;
+  System.SysUtils;
+{$ELSE}
+{$IFDEF MSWINDOWS}
+  Windows,
+{$ENDIF}
+  Classes,
+  Character,
+  DateUtils,
+  Math,
+  RegExpr,
+  StrUtils,
+  SyncObjs,
+  SysUtils;
+{$ENDIF}
+
 
 type
   TCPUInfo = record
@@ -716,7 +744,7 @@ type
     class function AddBenchmark(const family: TBenchmark): Integer;
     class procedure ClearBenchmarks;
     class function FindBenchmarks(spec: string;
-      var benchmarks: TArray<TBenchmarkInstance>; var Err: Text): Boolean;
+      var benchmarks: TArray<TBenchmarkInstance>; var Err: System.Text): Boolean;
   end;
 
   TBenchmarkReporter = class
@@ -768,7 +796,7 @@ type
   public
     function ReportContext(const context: TContext): Boolean; virtual; abstract;
     procedure ReportRuns(const reports: TArray<TRun>); virtual; abstract;
-    procedure PrintBasicContext(var output: Text; const context: TContext);
+    procedure PrintBasicContext(var output: System.Text; const context: TContext);
 
     property OutputStream: TStream write fOutputStream;
   end;
@@ -844,6 +872,64 @@ const
   kRangeMultiplier = 8;
   kMaxFamilySize = 100;
   kMaxIterations = 1000000000;
+
+
+{$REGION 'Freepascal Support'}
+
+{$IFDEF FPC}
+
+{$IFDEF MSWINDOWS}
+type
+  TLogicalProcessorRelationship = (RelationProcessorCore, RelationNumaNode,
+    RelationCache, RelationProcessorPackage, RelationGroup, RelationAll = $FFFF);
+  TProcessorCacheType = (CacheUnified, CacheInstruction, CacheData, CacheTrace);
+
+  TCacheDescriptor = record
+    Level: BYTE;
+    Associativity: BYTE;
+    LineSize: WORD;
+    Size: DWORD;
+    _Type: TProcessorCacheType;
+  end;
+  PCacheDescriptor = ^TCacheDescriptor;
+
+  TSystemLogicalProcessorInformation = record
+    ProcessorMask: ULONG_PTR;
+    Relationship: TLogicalProcessorRelationship;
+    case Integer of
+      0: (Flags: BYTE);
+      1: (NodeNumber: DWORD);
+      2: (Cache: TCacheDescriptor);
+      3: (Reserved: array [0..1] of ULONGLONG);
+  end;
+  PSystemLogicalProcessorInformation = ^TSystemLogicalProcessorInformation;
+
+function GetLogicalProcessorInformation(Buffer: PSystemLogicalProcessorInformation;
+  var ReturnedLength: DWORD): BOOL; external 'kernel32.dll' name 'GetLogicalProcessorInformation';
+{$ENDIF}
+
+type
+  TCharHelper = record helper for Char
+    function IsLetterOrDigit: Boolean;
+  end;
+
+  TRegEx = class(TRegExpr)
+    function IsMatch(const Input: string): Boolean; inline;
+  end;
+
+function TCharHelper.IsLetterOrDigit: Boolean;
+begin
+  Result := TCharacter.IsLetterOrDigit(Self);
+end;
+
+function TRegEx.IsMatch(const Input: string): Boolean;
+begin
+  Result := Exec(Input);
+end;
+
+{$ENDIF}
+
+{$ENDREGION}
 
 
 {$REGION 'Commandline flags'}
@@ -1449,10 +1535,10 @@ end;
 function GetCPUCyclesPerSecond: Double;
 {$IFDEF MSWINDOWS}
 
-  function GetCycles: UInt64;
+  function GetCycles: UInt64; {$IFDEF FPC}nostackframe; assembler;{$ENDIF}
   asm
     {$IFDEF CPUX64}
-    .noframe
+    {$IFNDEF FPC}.noframe{$ENDIF}
     rdtsc
     shl rdx,32
     or rax,rdx
@@ -1486,6 +1572,12 @@ end;
 function GetCacheSizes: TArray<TCPUInfo.TCacheInfo>;
 {$IFDEF MSWINDOWS}
 
+  {$IFDEF FPC}
+  function CountPopulation32(x: Cardinal): Integer; inline;
+  begin
+    Result := PopCnt(x);
+  end;
+  {$ELSE}
   {$IF not declared(System.CountPopulation32)}
   function CountPopulation32(x: Cardinal): Integer; inline;
   begin
@@ -1494,6 +1586,7 @@ function GetCacheSizes: TArray<TCPUInfo.TCacheInfo>;
     Result := ((((x shr 4) + x) and $0F0F0F0F) * $01010101) shr 24;
   end;
   {$IFEND}
+  {$ENDIF}
 
 const
   CacheTypes: array[TProcessorCacheType] of string = ('Unified', 'Instruction', 'Data', 'Trace');
@@ -1652,16 +1745,23 @@ end;
 
 // ported from: complexity.cc, complexity.h
 
+function __oN(const n: TIterationCount): Double; begin Result := n; end;
+function __oNSquared(const n: TIterationCount): Double; begin Result := Power(n, 2); end;
+function __oNCubed(const n: TIterationCount): Double; begin Result := Power(n, 3); end;
+function __oLogN(const n: TIterationCount): Double; begin Result := Log2(n); end;
+function __oNLogN(const n: TIterationCount): Double; begin Result := n * Log2(n); end;
+function __o1(const n: TIterationCount): Double; begin Result := 1; end;
+
 function FittingCurve(const complexity: TBigO): TBigOFunc;
 begin
   case complexity of
-    oN:         Result := function(const n: TIterationCount): Double begin Result := n; end;
-    oNSquared:  Result := function(const n: TIterationCount): Double begin Result := Power(n, 2); end;
-    oNCubed:    Result := function(const n: TIterationCount): Double begin Result := Power(n, 3); end;
-    oLogN:      Result := function(const n: TIterationCount): Double begin Result := Log2(n); end;
-    oNLogN:     Result := function(const n: TIterationCount): Double begin Result := n * Log2(n); end;
+    oN:         Result := __oN;
+    oNSquared:  Result := __oNSquared;
+    oNCubed:    Result := __oNCubed;
+    oLogN:      Result := __oLogN;
+    oNLogN:     Result := __oNLogN;
   else
-    Result := function(const n: TIterationCount): Double begin Result := 1; end;
+    Result := __o1;
   end;
 end;
 
@@ -1964,7 +2064,11 @@ begin
 
   center := Length(values) div 2;
   // sglienke: I was too lazy to reimplement std::nth_element so let's just sort
+  {$IFDEF FPC}
+  TArrayHelper<Double>.Sort(copy);
+  {$ELSE}
   TArray.Sort<Double>(copy);
+  {$ENDIF}
 
   // did we have an odd number of samples?
   // if yes, then center is the median
@@ -2863,9 +2967,12 @@ begin
 end;
 
 function TBenchmark.Arg(const x: Int64): TBenchmark;
+var
+  arg: TArray<Int64>;
 begin
   Assert((ArgsCount = -1) or (ArgsCount = 1));
-  fArgs := fArgs + [[x]];
+  arg := [x];
+  fArgs := fArgs + [arg];
   Result := Self;
 end;
 
@@ -2878,12 +2985,16 @@ end;
 function TBenchmark.Range(const start, limit: Int64): TBenchmark;
 var
   argList: TArray<Int64>;
+  arg: TArray<Int64>;
   i: Integer;
 begin
   Assert((ArgsCount = -1) or (ArgsCount = 1));
   AddRange(arglist, start, limit, fRangeMultiplier);
   for i in argList do
-    fArgs := fArgs + [[i]];
+  begin
+    arg := [i];
+    fArgs := fArgs + [arg];
+  end;
   Result := Self;
 end;
 
@@ -2891,12 +3002,14 @@ function TBenchmark.DenseRange(const start, limit: Int64;
   step: Integer): TBenchmark;
 var
   arg: Int64;
+  args: TArray<Int64>;
 begin
   Assert((ArgsCount = -1) or (ArgsCount = 1));
   Assert(start <= limit);
   arg := start;
   repeat
-    fArgs := fArgs + [[arg]];
+    args := [arg];
+    fArgs := fArgs + [args];
     Inc(arg, step);
   until arg > limit;
   Result := Self;
@@ -3189,12 +3302,12 @@ begin
 end;
 
 class function TBenchmarkFamilies.FindBenchmarks(spec: string;
-  var benchmarks: TArray<TBenchmarkInstance>; var Err: Text): Boolean;
+  var benchmarks: TArray<TBenchmarkInstance>; var Err: System.Text): Boolean;
 const
   oneThread = 1;
 var
 //  errorMsg: string;
-  re: TRegex;
+  re: TRegEx;
   isNegativeFilter: Boolean;
   family: TBenchmark;
   args: TArray<Int64>;
@@ -3207,7 +3320,7 @@ begin
 
   if spec[1] = '-' then
   begin
-    Delete(spec, 1, 1);
+    System.Delete(spec, 1, 1);
     isNegativeFilter := True;
   end;
   re := TRegex.Create(spec);
@@ -3326,7 +3439,7 @@ end;
 
 {$REGION 'TBenchmarkReporter'}
 
-procedure TBenchmarkReporter.PrintBasicContext(var output: Text;
+procedure TBenchmarkReporter.PrintBasicContext(var output: System.Text;
   const context: TContext);
 type
   info = TCPUInfo;
