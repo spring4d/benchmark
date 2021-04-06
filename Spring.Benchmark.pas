@@ -2769,7 +2769,7 @@ begin
   Assert(fRunning);
   fRunning := False;
   fRealTimeUsed := fRealTimeUsed + ChronoClockNow - fStartRealTime;
-  fCpuTimeUsed := ReadCpuTimerOfChoice - fStartCpuTime;
+  fCpuTimeUsed := fCpuTimeUsed + ReadCpuTimerOfChoice - fStartCpuTime;
 end;
 
 {$ENDREGION}
@@ -3446,7 +3446,7 @@ begin
       if not IsZero(family.fMinTime) then
         instance.name.minTime := Format('minTime:%0.3f', [family.fMinTime]);
       if family.fIterations <> 0 then
-        instance.name.iterations := Format('iterations:%lu', [family.fIterations]);
+        instance.name.iterations := Format('iterations:%u', [family.fIterations]);
       if family.fRepetitions <> 0 then
         instance.name.pepetitions := Format('repeats:%d', [family.fRepetitions]);
 
