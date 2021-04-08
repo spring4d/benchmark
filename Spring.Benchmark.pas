@@ -1343,6 +1343,7 @@ procedure ToExponentAndMantissa(val, thresh: Double; precision: Integer;
 
 const
   fmt: TFormatSettings = (DecimalSeparator: '.');
+  outputPrecision = 6;
 var
   adjusted_threshold,
   big_threshold,
@@ -1374,12 +1375,12 @@ begin
       scaled := scaled / oneK;
       if scaled <= big_threshold then
       begin
-        mantissa := mantissa + scaled.ToString(fmt);
+        mantissa := mantissa + scaled.ToString(ffGeneral, outputPrecision, 0, fmt);
         exponent := i + 1;
         Exit;
       end;
     end;
-    mantissa := mantissa + val.ToString(fmt);
+    mantissa := mantissa + val.ToString(ffGeneral, outputPrecision, 0, fmt);
     exponent := 0;
   end
   else if val < small_threshold then
@@ -1393,18 +1394,18 @@ begin
         scaled := scaled * oneK;
         if scaled >= small_threshold then
         begin
-          mantissa := mantissa + scaled.ToString(fmt);
+          mantissa := mantissa + scaled.ToString(ffGeneral, outputPrecision, 0, fmt);
           exponent := -(i + 1);
           Exit;
         end;
       end;
     end;
-    mantissa := mantissa + val.ToString(fmt);
+    mantissa := mantissa + val.ToString(ffGeneral, outputPrecision, 0, fmt);
     exponent := 0;
   end
   else
   begin
-    mantissa := mantissa + val.ToString(fmt);
+    mantissa := mantissa + val.ToString(ffGeneral, outputPrecision, 0, fmt);
     exponent := 0;
   end;
 end;
