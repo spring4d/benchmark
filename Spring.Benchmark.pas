@@ -33,6 +33,9 @@ unit Spring.Benchmark;
   {$IFOPT D+}{$DEFINE DEBUG}{$ENDIF}
   {$MODE DELPHI}
   {$ASMMODE INTEL}
+  {$NOTES OFF}
+  {$HINTS OFF}
+  {$WARNINGS OFF}
 {$ELSE}
   {$LEGACYIFEND ON}
   {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
@@ -46,13 +49,6 @@ unit Spring.Benchmark;
 {$ENDIF}
 
 interface
-
-uses
-{$IFDEF HAS_UNITSCOPE}
-  System.Generics.Collections;
-{$ELSE}
-  Generics.Collections;
-{$ENDIF}
 
 type
   PCounter = ^TCounter;
@@ -741,7 +737,7 @@ type
 
   TBenchmarkFamilies = class
   strict private class var
-    fFamilies: TList<TBenchmark>;
+    fFamilies: TList;
     fLock: TCriticalSection;
     class constructor Create;
     class destructor Destroy;
@@ -1463,7 +1459,6 @@ begin
   Result := complexityStrs[complexity];
 end;
 
-
 {$ENDREGION}
 
 
@@ -2102,7 +2097,6 @@ begin
   Result := True;
 end;
 
-
 {$ENDREGION}
 
 
@@ -2126,6 +2120,35 @@ begin
 end;
 
 function StatisticsMedian(const values: array of Double): Double;
+
+   procedure Sort(var values: array of Double);
+   type
+     TSlice = array[0..0] of Double;
+   var
+     lo, hi: Integer;
+     pivot, temp: Double;
+   begin
+     lo := 0;
+     hi := High(values);
+     pivot := values[(lo + hi) div 2];
+     repeat
+       while values[lo] < pivot do Inc(Lo);
+       while values[hi] > pivot do Dec(Hi);
+       if lo <= hi then
+       begin
+         temp := values[lo];
+         values[lo] := values[hi];
+         values[hi] := temp;
+         Inc(lo);
+         Dec(hi);
+       end;
+     until lo > hi;
+     if hi > 0 then Sort(Slice(values, hi+1));
+     {$IFOPT R+}{$R-}{$DEFINE RANGECHECKS_ON}{$ENDIF}
+     if lo < High(values) then Sort(Slice(TSlice(values[lo]), High(values)-lo+1));
+     {$IFDEF RANGECHECKS_ON}{$R+}{$ENDIF}
+   end;
+
 var
   copy: TArray<Double>;
   center: Integer;
@@ -2136,11 +2159,7 @@ begin
 
   center := Length(values) div 2;
   // sglienke: I was too lazy to reimplement std::nth_element so let's just sort
-  {$IFDEF FPC}
-  TArrayHelper<Double>.Sort(copy);
-  {$ELSE}
-  TArray.Sort<Double>(copy);
-  {$ENDIF}
+  Sort(copy);
 
   // did we have an odd number of samples?
   // if yes, then center is the median
@@ -2348,8 +2367,6 @@ begin
     Result := nil;
   end;
 end;
-
-
 
 function IsColorTerminal: Boolean;
 {$IFDEF MSWINDOWS}
@@ -2603,7 +2620,6 @@ begin
   Result := RegisterBenchmarkInternal(TFunctionBenchmark.Create(name, fn));
 end;
 
-
 procedure RunInThread(const benchmark: TBenchmarkInstance; iters: TIterationCount;
   threadId: Integer; const manager: TThreadManager);
 var
@@ -2683,6 +2699,13 @@ end;
 
 {$REGION 'TCounter' }
 
+procedure TCounter.Init(v: Double; f: TFlags; k: TOneK);
+begin
+  Self.value := v;
+  Self.flags := f;
+  Self.oneK := k;
+end;
+
 function Counter(const value: Double; flags: TCounter.TFlags; k: TCounter.TOneK): TCounter;
 begin
   Result.Init(value, flags, k);
@@ -2691,13 +2714,6 @@ end;
 class operator TCounter.Implicit(const value: Double): TCounter;
 begin
   Result.Init(value);
-end;
-
-procedure TCounter.Init(v: Double; f: TFlags; k: TOneK);
-begin
-  Self.value := v;
-  Self.flags := f;
-  Self.oneK := k;
 end;
 
 {$ENDREGION}
@@ -2955,7 +2971,7 @@ begin
   if not fStarted then
   begin
     StartKeepRunning;
-    if not fErrorOccured and (fTotalIterations >= 0) then
+    if not fErrorOccured and (fTotalIterations >= n) then
     begin
       Dec(fTotalIterations, n);
       Exit(True);
@@ -2995,7 +3011,6 @@ end;
 
 function TState.TStateIterator.MoveNext: Boolean;
 begin
-  Assert(fCached >= 0);
 {$IFDEF HAS_RECORD_FINALIZER}
   Result := fCached > 0;
   if Result then
@@ -3347,13 +3362,17 @@ end;
 
 class constructor TBenchmarkFamilies.Create;
 begin
-  fFamilies := TObjectList<TBenchmark>.Create;
+  fFamilies := TList.Create;
   fLock := TCriticalSection.Create;
 end;
 
 class destructor TBenchmarkFamilies.Destroy;
+var
+  i: Integer;
 begin
   fLock.Free;
+  for i := 0 to fFamilies.Count - 1 do
+    TObject(fFamilies[i]).Free;
   fFamilies.Free;
 end;
 
