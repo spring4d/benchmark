@@ -186,9 +186,12 @@ type
       hasError: Boolean;
       counters: TUserCounters;
     end;
+  private
+    fAliveThreads: Integer;
   public
     results: TResult;
     constructor Create(const numThreads: Integer);
+    procedure NotifyThreadComplete;
   end;
 
   TAggregationReportMode = (
@@ -235,12 +238,14 @@ type
     fBatchLeftover,
 
     fMaxIterations: TIterationCount;
-    fStarted, fFinished, fErrorOccured: Boolean;
+    fStarted, fFinished, fErrorOccurred: Boolean;
 
     fRange: TArray<Int64>;
     fComplexityN: Int64;
     fTimer: TThreadTimer;
     fManager: TThreadManager;
+    fThreadIndex: Integer;
+    fThreads: Integer;
 
     function GetBytesProcessed: Int64;
     function GetItemsProcessed: Int64;
@@ -260,12 +265,13 @@ type
     constructor Create(const maxIters: TIterationCount; const ranges: TArray<Int64>;
       threadId, threadCount: Integer; const timer: TThreadTimer;
       const manager: TThreadManager);
+    property MaxIterations: TIterationCount read fMaxIterations;
   public
     // Index of the executing thread. Values from [0, threads).
-    threadIndex: Integer;
+    property ThreadIndex: Integer read fThreadIndex;
 
     // Number of threads concurrently executing the benchmark.
-    threads: Integer;
+    property Threads: Integer read fThreads;
 
     // Returns iterator used to run each iteration of a benchmark using a
     // for-in loop. This function should not be called directly.
@@ -341,7 +347,7 @@ type
     procedure SkipWithError(const msg: string);
 
     // Returns true if an error has been reported with 'SkipWithError(...)'.
-    property ErrorOccured: Boolean read fErrorOccured;
+    property ErrorOccurred: Boolean read fErrorOccurred;
 
     // REQUIRES: called exactly once per iteration of the benchmarking loop.
     // Set the manually measured time for this benchmark iteration, which
@@ -766,7 +772,7 @@ type
       runType: TRunType;
       aggregateName: string;
       reportLabel: string;
-      errorOccured: Boolean;
+      errorOccurred: Boolean;
       errorMessage: string;
       iterations: TIterationCount;
       threads: Int64;
@@ -2226,7 +2232,7 @@ var
 begin
   errorCount := 0;
   for i := 0 to High(reports) do
-    Inc(errorCount, Byte(reports[i].errorOccured));
+    Inc(errorCount, Byte(reports[i].errorOccurred));
 
   if High(reports) - errorCount < 1 then
     // We don't report aggregated data if there was a single run.
@@ -2263,7 +2269,7 @@ begin
   begin
     Assert(reports[0].BenchmarkName = reports[i].BenchmarkName);
     Assert(runIterations = reports[i].iterations);
-    if reports[i].errorOccured then Continue;
+    if reports[i].errorOccurred then Continue;
     realAccumulatedTimeStat[realAccumulatedTimeStatIdx] := reports[i].realAccumulatedTime;
     Inc(realAccumulatedTimeStatIdx);
     cpuAccumulatedTimeStat[cpuAccumulatedTimeStatIdx] := reports[i].cpuAccumulatedTime;
@@ -2630,8 +2636,8 @@ begin
   timer := TThreadTimer.Create(benchmark.measureProcessCpuTime);
   try
     st := benchmark.Run(iters, threadId, timer, manager);
-//  CHECK(st.error_occurred() || st.iterations() >= st.max_iterations)
-//      << "Benchmark returned before State::KeepRunning() returned false!";
+    Assert(st.ErrorOccurred or (st.Iterations >= st.MaxIterations),
+      'Benchmark returned before TState.KeepRunning() returned false!');
 
     results := @manager.results;
     results.iterations := results.iterations + st.iterations;
@@ -2641,7 +2647,7 @@ begin
     results.complexityN := results.complexityN + st.ComplexityN;
     Increment(results.counters, st.fCounters);
 
-//  manager.NotifyThreadComplete;
+//    manager.NotifyThreadComplete;
   finally
     timer.Free;
   end;
@@ -2659,7 +2665,7 @@ var
 begin
   report := TBenchmarkReporter.TRun.Create;
   report.runName := benchmark.name;
-  report.errorOccured := results.hasError;
+  report.errorOccurred := results.hasError;
   report.errorMessage := results.errorMessage;
   report.reportLabel := results.reportLabel;
   // This is the total iterations across all threads.
@@ -2669,7 +2675,7 @@ begin
   report.repetitionIndex := repetitionIndex;
   report.repetitions := benchmark.repetitions;
 
-  if not report.errorOccured then
+  if not report.errorOccurred then
   begin
     if benchmark.useManualTime then
       report.realAccumulatedTime := results.manualTimeUsed
@@ -2797,8 +2803,17 @@ end;
 constructor TThreadManager.Create(const numThreads: Integer);
 begin
    //: alive_threads_(num_threads), start_stop_barrier_(num_threads) {}
-
+  fAliveThreads := numThreads;
   results := Default(TResult);
+end;
+
+procedure TThreadManager.NotifyThreadComplete;
+begin
+  if AtomicDecrement(fAliveThreads) = 0 then
+  begin
+//    MutexLock lock(end_cond_mutex_);
+//    end_condition_.notify_all();
+  end;
 end;
 
 {$ENDREGION}
@@ -2814,21 +2829,20 @@ begin
   fMaxIterations := maxIters;
   fStarted := False;
   fFinished := False;
-  fErrorOccured := False;
+  fErrorOccurred := False;
   fRange := ranges;
   fComplexityN := 0;
-//      counters(),
-//      thread_index(thread_i),
-//      threads(n_threads),
+  fThreadIndex := threadId;
+  fThreads := threadCount;
   fTimer := timer;
   fManager := manager;
   Assert(fMaxIterations <> 0, 'At least one iteration must be run');
-//  Assert(fThreadIndex < fThreads, 'thread_index must be less than threads');
+  Assert(fThreadIndex < fThreads, 'thread_index must be less than threads');
 end;
 
 function TState.GetEnumerator: TStateIterator;
 begin
-  Result.fCached := fMaxIterations and (Int64(fErrorOccured) - 1);
+  Result.fCached := fMaxIterations and (Int64(fErrorOccurred) - 1);
   Result.fParent := @Self;
   StartKeepRunning;
 end;
@@ -2876,20 +2890,20 @@ end;
 
 procedure TState.PauseTiming;
 begin
-  Assert(fStarted and not fFinished and not fErrorOccured);
+  Assert(fStarted and not fFinished and not fErrorOccurred);
   fTimer.StopTimer;
 end;
 
 procedure TState.ResumeTiming;
 begin
-  Assert(fStarted and not fFinished and not fErrorOccured);
+  Assert(fStarted and not fFinished and not fErrorOccurred);
   fTimer.StartTimer;
 end;
 
 procedure TState.SkipWithError(const msg: string);
 begin
   Assert(msg <> '');
-  fErrorOccured := True;
+  fErrorOccurred := True;
   if not fManager.results.hasError then
   begin
     fManager.results.errorMessage := msg;
@@ -2934,7 +2948,7 @@ procedure TState.StartKeepRunning;
 begin
   Assert(not fStarted and not fFinished);
   fStarted := True;
-  if not fErrorOccured then
+  if not fErrorOccurred then
   begin
     fTotalIterations := fMaxIterations;
 //  manager_->StartStopBarrier();
@@ -2950,8 +2964,8 @@ end;
 
 procedure TState.FinishKeepRunning;
 begin
-  Assert(fStarted and (not fFinished or fErrorOccured));
-  if not fErrorOccured then
+  Assert(fStarted and (not fFinished or fErrorOccurred));
+  if not fErrorOccurred then
     PauseTiming;
   fTotalIterations := 0;
   fFinished := True;
@@ -2971,7 +2985,7 @@ begin
   if not fStarted then
   begin
     StartKeepRunning;
-    if not fErrorOccured and (fTotalIterations >= n) then
+    if not fErrorOccurred and (fTotalIterations >= n) then
     begin
       Dec(fTotalIterations, n);
       Exit(True);
@@ -3592,7 +3606,7 @@ begin
   with Result do
   begin
     runType := rtIteration;
-    errorOccured := False;
+    errorOccurred := False;
     iterations := 1;
     threads := 1;
     timeUnit := kNanosecond;
@@ -3721,7 +3735,7 @@ begin
     nameColor := clGreen;
   Write('%-*s ', [fNameFieldWidth, result.BenchmarkName], nameColor);
 
-  if result.errorOccured then
+  if result.errorOccurred then
   begin
     WriteLine('ERROR OCCURRED: ''%s''', [result.errorMessage], clRed);
     Exit;
@@ -3868,7 +3882,7 @@ var
   i: Integer;
 begin
   fOutputStream.WriteData(CsvEscape(run.BenchmarkName) + csv_separator);
-  if run.errorOccured then
+  if run.errorOccurred then
   begin
     fOutputStream.WriteData((Length(elements) - 3).ToString + csv_separator);
     fOutputStream.WriteData('true,');
@@ -4087,7 +4101,7 @@ begin
   report := CreateRunReport(benchmark, i.results, memoryIterations,{ memory_result,}
                             i.seconds, repetitionIndex);
 
-  if not report.errorOccured and (benchmark.complexity <> oNone) then
+  if not report.errorOccurred and (benchmark.complexity <> oNone) then
     complexityReports^ := complexityReports^ + [report];
 
   runResults.nonAggregates := runResults.nonAggregates + [report];
