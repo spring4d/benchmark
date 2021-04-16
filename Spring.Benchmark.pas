@@ -57,35 +57,34 @@ uses
 {$IFDEF MSWINDOWS}
   Windows,
 {$ENDIF}
+{$IFDEF UNIX}
+  cthreads,
+{$ENDIF}
   SyncObjs;
 {$ENDIF}
 
 
-{$REGION 'Freepascal Support'}
-
-{$IFDEF FPC}
-
-{$IFDEF MSWINDOWS}
 type
+{$IFDEF FPC}
+  {$IFDEF MSWINDOWS}
   TRTLConditionVariable = record
     Ptr: Pointer;
   end;
-
-  TConditionVariableCS = class
+  {$ENDIF}
+  {$IFDEF UNIX}
+  TRTLConditionVariable = pthread_cond_t;
+  {$ENDIF}
+  TConditionVariable = class
   private
     fConditionVariable: TRTLConditionVariable;
   public
     procedure ReleaseAll;
     procedure WaitFor(criticalSection: TCriticalSection);
   end;
+{$ELSE}
+  TConditionVariable = TConditionVariableCS;
 {$ENDIF}
 
-{$ENDIF}
-
-{$ENDREGION}
-
-
-type
   PCounter = ^TCounter;
   TCounter = record
   type
@@ -211,7 +210,7 @@ type
   TBarrier = class
   private
     fLock: TCriticalSection;
-    fPhaseCondition: TConditionVariableCS;
+    fPhaseCondition: TConditionVariable;
     fRunningThreads: Integer;
     fPhaseNumber: Integer;
     fEntered: Integer;
@@ -242,7 +241,7 @@ type
     fAliveThreads: Integer;
     fStartStopBarrier: TBarrier;
     fEndCondLock: TCriticalSection;
-    fEndCondition: TConditionVariableCS;
+    fEndCondition: TConditionVariable;
   public
     results: TResult;
     constructor Create(const numThreads: Integer);
@@ -975,22 +974,32 @@ procedure WakeAllConditionVariable(var ConditionVariable: TRTLConditionVariable)
 function SleepConditionVariableCS(var ConditionVariable: TRTLConditionVariable;
   var CriticalSection: TRTLCriticalSection; dwMilliseconds: DWORD): BOOL; stdcall;
   external kernel32 name 'SleepConditionVariableCS';
-
-procedure TConditionVariableCS.ReleaseAll;
-begin
-  WakeAllConditionVariable(FConditionVariable);
-end;
+{$ENDIF}
 
 type
   TCriticalSectionHelper = class(TSynchroObject)
     FSection: TRTLCriticalSection;
   end;
 
-procedure TConditionVariableCS.WaitFor(criticalSection: TCriticalSection);
+procedure TConditionVariable.ReleaseAll;
 begin
-  SleepConditionVariableCS(FConditionVariable, TCriticalSectionHelper(criticalSection).FSection, INFINITE);
+  {$IFDEF MSWINDOWS}
+  WakeAllConditionVariable(fConditionVariable);
+  {$ENDIF}
+  {$IFDEF UNIX}
+  pthread_cond_broadcast(fConditionVariable);
+  {$ENDIF}
 end;
-{$ENDIF}
+
+procedure TConditionVariable.WaitFor(criticalSection: TCriticalSection);
+begin
+  {$IFDEF MSWINDOWS}
+  SleepConditionVariableCS(fConditionVariable, TCriticalSectionHelper(criticalSection).FSection, INFINITE);
+  {$ENDIF}
+  {$IFDEF UNIX}
+  pthread_cond_wait(fConditionVariable, TCriticalSectionHelper(criticalSection).FSection);
+  {$ENDIF}
+end;
 
 type
   TCharHelper = record helper for Char
@@ -2885,7 +2894,7 @@ end;
 constructor TBarrier.Create(numThreads: Integer);
 begin
   fLock := TCriticalSection.Create;
-  fPhaseCondition := TConditionVariableCS.Create;
+  fPhaseCondition := TConditionVariable.Create;
   fRunningThreads := numThreads;
 end;
 
@@ -2953,7 +2962,7 @@ begin
   fAliveThreads := numThreads;
   fStartStopBarrier := TBarrier.Create(numThreads);
   fEndCondLock := TCriticalSection.Create;
-  fEndCondition := TConditionVariableCS.Create;
+  fEndCondition := TConditionVariable.Create;
 end;
 
 destructor TThreadManager.Destroy;
