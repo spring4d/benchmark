@@ -497,7 +497,6 @@ type
     fStatistics: TArray<TStatistics>;
     fThreadCounts: TArray<Integer>;
     function GetArgsCount: Integer;
-    procedure SetName(const name: string);
   strict protected
     constructor Create(const name: string);
   public
@@ -505,9 +504,6 @@ type
 
     // Note: the following methods all return "Self" so that multiple
     // method calls can be chained together in one expression.
-
-    // Specify the name of the benchmark
-    function Name(const name: string): TBenchmark;
 
     // Run this benchmark once with "x" as the extra argument passed
     // to the function.
@@ -2703,7 +2699,7 @@ begin
   Result := RegisterBenchmarkInternal(TFunctionBenchmark.Create(name, fn));
 end;
 
-function Benchmark(const fn: TFunction; const name: string = ''): TBenchmark;
+function Benchmark(const fn: TFunction; const name: string): TBenchmark;
 begin
   Result := RegisterBenchmarkInternal(TFunctionBenchmark.Create(name, fn));
 end;
@@ -3253,6 +3249,7 @@ end;
 
 constructor TBenchmark.Create(const name: string);
 begin
+  Assert(name <> '');
   fName := name;
   fRangeMultiplier := kRangeMultiplier;
   ComputeStatistics('mean', StatisticsMean);
@@ -3264,17 +3261,6 @@ function TBenchmark.GetArgsCount: Integer;
 begin
   if fArgs = nil then Exit(-1);
   Result := Length(fArgs[0]);
-end;
-
-procedure TBenchmark.SetName(const name: string);
-begin
-  fName := name;
-end;
-
-function TBenchmark.Name(const name: string): TBenchmark;
-begin
-  SetName(name);
-  Result := Self;
 end;
 
 function TBenchmark.Arg(const x: Int64): TBenchmark;
