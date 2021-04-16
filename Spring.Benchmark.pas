@@ -50,6 +50,41 @@ unit Spring.Benchmark;
 
 interface
 
+uses
+{$IFDEF HAS_UNITSCOPE}
+  System.SyncObjs;
+{$ELSE}
+{$IFDEF MSWINDOWS}
+  Windows,
+{$ENDIF}
+  SyncObjs;
+{$ENDIF}
+
+
+{$REGION 'Freepascal Support'}
+
+{$IFDEF FPC}
+
+{$IFDEF MSWINDOWS}
+type
+  TRTLConditionVariable = record
+    Ptr: Pointer;
+  end;
+
+  TConditionVariableCS = class
+  private
+    fConditionVariable: TRTLConditionVariable;
+  public
+    procedure ReleaseAll;
+    procedure WaitFor(criticalSection: TCriticalSection);
+  end;
+{$ENDIF}
+
+{$ENDIF}
+
+{$ENDREGION}
+
+
 type
   PCounter = ^TCounter;
   TCounter = record
@@ -173,6 +208,22 @@ type
     property ManualTimeUsed: Double read GetManualTimeUsed;
   end;
 
+  TBarrier = class
+  private
+    fLock: TCriticalSection;
+    fPhaseCondition: TConditionVariableCS;
+    fRunningThreads: Integer;
+    fPhaseNumber: Integer;
+    fEntered: Integer;
+
+    function CreateBarrier: Boolean;
+  public
+    constructor Create(numThreads: Integer);
+    destructor Destroy; override;
+    function Wait: Boolean;
+    procedure RemoveThread;
+  end;
+
   TThreadManager = class
   type
     TResult = record
@@ -187,11 +238,20 @@ type
       counters: TUserCounters;
     end;
   private
+    fBenchmarkLock: TCriticalSection;
     fAliveThreads: Integer;
+    fStartStopBarrier: TBarrier;
+    fEndCondLock: TCriticalSection;
+    fEndCondition: TConditionVariableCS;
   public
     results: TResult;
     constructor Create(const numThreads: Integer);
+    destructor Destroy; override;
+    procedure Lock;
+    procedure Unlock;
+    function StartStopBarrier: Boolean;
     procedure NotifyThreadComplete;
+    procedure WaitForAllThreads;
   end;
 
   TAggregationReportMode = (
@@ -660,19 +720,14 @@ uses
   System.Math,
   System.RegularExpressions,
   System.StrUtils,
-  System.SyncObjs,
   System.SysUtils;
 {$ELSE}
-{$IFDEF MSWINDOWS}
-  Windows,
-{$ENDIF}
   Classes,
   Character,
   DateUtils,
   Math,
   RegExpr,
   StrUtils,
-  SyncObjs,
   SysUtils;
 {$ENDIF}
 
@@ -858,7 +913,7 @@ type
     minTime: Double;
     repeats: Integer;
     hasExplicitIterationCount: Boolean;
-//    pool: TArray<TThread>;
+    pool: TArray<TThread>;
     iters: TIterationCount;
 
     type TIterationResults = record
@@ -887,6 +942,9 @@ const
 {$IFDEF FPC}
 
 {$IFDEF MSWINDOWS}
+const
+  kernel32 = 'kernel32.dll';
+
 type
   TLogicalProcessorRelationship = (RelationProcessorCore, RelationNumaNode,
     RelationCache, RelationProcessorPackage, RelationGroup, RelationAll = $FFFF);
@@ -913,7 +971,29 @@ type
   PSystemLogicalProcessorInformation = ^TSystemLogicalProcessorInformation;
 
 function GetLogicalProcessorInformation(Buffer: PSystemLogicalProcessorInformation;
-  var ReturnedLength: DWORD): BOOL; external 'kernel32.dll' name 'GetLogicalProcessorInformation';
+  var ReturnedLength: DWORD): BOOL; external kernel32 name 'GetLogicalProcessorInformation';
+
+procedure WakeAllConditionVariable(var ConditionVariable: TRTLConditionVariable); stdcall;
+  external kernel32 name 'WakeAllConditionVariable';
+
+function SleepConditionVariableCS(var ConditionVariable: TRTLConditionVariable;
+  var CriticalSection: TRTLCriticalSection; dwMilliseconds: DWORD): BOOL; stdcall;
+  external kernel32 name 'SleepConditionVariableCS';
+
+procedure TConditionVariableCS.ReleaseAll;
+begin
+  WakeAllConditionVariable(FConditionVariable);
+end;
+
+type
+  TCriticalSectionHelper = class(TSynchroObject)
+    FSection: TRTLCriticalSection;
+  end;
+
+procedure TConditionVariableCS.WaitFor(criticalSection: TCriticalSection);
+begin
+  SleepConditionVariableCS(FConditionVariable, TCriticalSectionHelper(criticalSection).FSection, INFINITE);
+end;
 {$ENDIF}
 
 type
@@ -934,6 +1014,8 @@ function TRegEx.IsMatch(const Input: string): Boolean;
 begin
   Result := Exec(Input);
 end;
+
+function AtomicDecrement(var target: Integer): Integer; external name 'FPC_INTERLOCKEDDECREMENT';
 
 {$ENDIF}
 
@@ -2639,15 +2721,19 @@ begin
     Assert(st.ErrorOccurred or (st.Iterations >= st.MaxIterations),
       'Benchmark returned before TState.KeepRunning() returned false!');
 
-    results := @manager.results;
-    results.iterations := results.iterations + st.iterations;
-    results.cpuTimeUsed := results.cpuTimeUsed + timer.CpuTimeUsed;
-    results.realTimeUsed := results.realTimeUsed + timer.RealTimeUsed;
-    results.manualTimeUsed := results.manualTimeUsed + timer.ManualTimeUsed;
-    results.complexityN := results.complexityN + st.ComplexityN;
-    Increment(results.counters, st.fCounters);
-
-//    manager.NotifyThreadComplete;
+    manager.Lock;
+    try
+      results := @manager.results;
+      results.iterations := results.iterations + st.iterations;
+      results.cpuTimeUsed := results.cpuTimeUsed + timer.CpuTimeUsed;
+      results.realTimeUsed := results.realTimeUsed + timer.RealTimeUsed;
+      results.manualTimeUsed := results.manualTimeUsed + timer.ManualTimeUsed;
+      results.complexityN := results.complexityN + st.ComplexityN;
+      Increment(results.counters, st.fCounters);
+    finally
+      manager.Unlock;
+      manager.NotifyThreadComplete;
+    end;
   finally
     timer.Free;
   end;
@@ -2798,21 +2884,128 @@ end;
 {$ENDREGION}
 
 
+{$REGION 'TBarrier'}
+
+constructor TBarrier.Create(numThreads: Integer);
+begin
+  fLock := TCriticalSection.Create;
+  fPhaseCondition := TConditionVariableCS.Create;
+  fRunningThreads := numThreads;
+end;
+
+destructor TBarrier.Destroy;
+begin
+  fPhaseCondition.Free;
+  fLock.Free;
+end;
+
+function TBarrier.Wait: Boolean;
+var
+  lastThread: Boolean;
+begin
+  fLock.Acquire;
+  try
+    lastThread := CreateBarrier;
+  finally
+    fLock.Release;
+  end;
+  if lastThread then
+    fPhaseCondition.ReleaseAll;
+  Result := lastThread;
+end;
+
+procedure TBarrier.RemoveThread;
+begin
+  fLock.Acquire;
+  try
+    Dec(fRunningThreads);
+    if fEntered <> 0 then
+      fPhaseCondition.ReleaseAll;
+  finally
+    fLock.Release;
+  end;
+end;
+
+function TBarrier.CreateBarrier: Boolean;
+var
+  phaseNumber: Integer;
+begin
+  Inc(fEntered);
+  if fEntered < fRunningThreads then
+  begin
+    // Wait for all threads to enter
+    phaseNumber := fPhaseNumber;
+    while not ((fPhaseNumber > phaseNumber) or (fEntered = fRunningThreads)) do
+      fPhaseCondition.WaitFor(fLock);
+    if fPhaseNumber > phaseNumber then
+      Exit(False);
+  end;
+  Inc(fPhaseNumber);
+  fEntered := 0;
+  Result := True;
+end;
+
+{$ENDREGION}
+
+
 {$REGION 'TThreadManager'}
 
 constructor TThreadManager.Create(const numThreads: Integer);
 begin
-   //: alive_threads_(num_threads), start_stop_barrier_(num_threads) {}
-  fAliveThreads := numThreads;
   results := Default(TResult);
+  fBenchmarkLock := TCriticalSection.Create;
+  fAliveThreads := numThreads;
+  fStartStopBarrier := TBarrier.Create(numThreads);
+  fEndCondLock := TCriticalSection.Create;
+  fEndCondition := TConditionVariableCS.Create;
+end;
+
+destructor TThreadManager.Destroy;
+begin
+  fEndCondition.Free;
+  fEndCondLock.Free;
+  fStartStopBarrier.Free;
+  fBenchmarkLock.Free;
+  inherited;
+end;
+
+procedure TThreadManager.Lock;
+begin
+  fBenchmarkLock.Acquire;
+end;
+
+procedure TThreadManager.Unlock;
+begin
+  fBenchmarkLock.Release;
+end;
+
+function TThreadManager.StartStopBarrier: Boolean;
+begin
+  Result := fStartStopBarrier.Wait;
 end;
 
 procedure TThreadManager.NotifyThreadComplete;
 begin
+  fStartStopBarrier.RemoveThread;
   if AtomicDecrement(fAliveThreads) = 0 then
   begin
-//    MutexLock lock(end_cond_mutex_);
-//    end_condition_.notify_all();
+    fEndCondLock.Acquire;
+    try
+      fEndCondition.ReleaseAll;
+    finally
+      fEndCondLock.Release;
+    end;
+  end;
+end;
+
+procedure TThreadManager.WaitForAllThreads;
+begin
+  fEndCondLock.Acquire;
+  try
+    while fAliveThreads <> 0 do
+      fEndCondition.WaitFor(fEndCondLock);
+  finally
+    fEndCondLock.Release;
   end;
 end;
 
@@ -2904,10 +3097,15 @@ procedure TState.SkipWithError(const msg: string);
 begin
   Assert(msg <> '');
   fErrorOccurred := True;
-  if not fManager.results.hasError then
-  begin
-    fManager.results.errorMessage := msg;
-    fManager.results.hasError := True;
+  fManager.Lock;
+  try
+    if not fManager.results.hasError then
+    begin
+      fManager.results.errorMessage := msg;
+      fManager.results.hasError := True;
+    end;
+  finally
+    fManager.Unlock;
   end;
   fTotalIterations := 0;
   if fTimer.Running then
@@ -2941,7 +3139,12 @@ end;
 
 procedure TState.SetLabel(const text: string);
 begin
-  fManager.results.reportLabel := text;
+  fManager.Lock;
+  try
+    fManager.results.reportLabel := text;
+  finally
+    fManager.Unlock;
+  end;
 end;
 
 procedure TState.StartKeepRunning;
@@ -2951,7 +3154,7 @@ begin
   if not fErrorOccurred then
   begin
     fTotalIterations := fMaxIterations;
-//  manager_->StartStopBarrier();
+    fManager.StartStopBarrier;
     {$IFOPT C-}
     fTimer.StartTimer;
     {$ELSE}
@@ -2959,7 +3162,10 @@ begin
     {$ENDIF}
   end
   else
+  begin
     fTotalIterations := 0;
+    fManager.StartStopBarrier;
+  end;
 end;
 
 procedure TState.FinishKeepRunning;
@@ -2969,7 +3175,7 @@ begin
     PauseTiming;
   fTotalIterations := 0;
   fFinished := True;
-//  manager_->StartStopBarrier();
+  fManager.StartStopBarrier;
 end;
 
 function TState.KeepRunningInternal(const n: TIterationCount;
@@ -3419,7 +3625,10 @@ var
   re: TRegEx;
   isNegativeFilter: Boolean;
   family: TBenchmark;
+  threadCounts: TArray<Integer>;
+  familySize: Integer;
   args: TArray<Int64>;
+  numThreads: Integer;
   instance: TBenchmarkInstance;
   arg: Int64;
   i: Integer;
@@ -3439,107 +3648,91 @@ begin
     if family.ArgsCount = -1 then
       family.fArgs := [[]];
 
+    if family.fThreadCounts = nil then
+      threadCounts := [oneThread]
+    else
+      threadCounts := family.fThreadCounts;
+    familySize := Length(family.fArgs) * Length(threadCounts);
+    // The benchmark will be run at least 'family_size' different inputs.
+    if familySize > kMaxFamilySize then
+      Writeln(Err, 'The number of inputs is very large. ', family.fName,
+                   ' will be repeated at least ', familySize, ' times.');
+
     for args in family.fArgs do
-    begin
-      instance := Default(TBenchmarkInstance);
-      instance.name.functionName := family.fName;
-      instance.benchmark := family;  //.get
-      instance.aggregationReportMode := family.fAggregationReportMode;
-      instance.arg := args;
-      instance.timeUnit := family.fTimeUnit;
-      instance.rangeMultiplier := family.fRangeMultiplier;
-      instance.minTime := family.fMinTime;
-      instance.iterations := family.fIterations;
-      instance.repetitions := family.fRepetitions;
-      instance.measureProcessCpuTime := family.fMeasureProcessCpuTime;
-      instance.useRealTime := family.fUseRealTime;
-      instance.useManualTime := family.fUseManualTime;
-      instance.complexity := family.fComplexity;
-      instance.complexityLambda := family.fComplexityLambda;
-      instance.statistics := family.fStatistics;
-      instance.threads := oneThread;
-
-      // Add arguments to instance name
-      i := 0;
-      for arg in args do
+      for numThreads in threadCounts do
       begin
-        if instance.name.args <> '' then
-          instance.name.args := instance.name.args + '/';
+        instance := Default(TBenchmarkInstance);
+        instance.name.functionName := family.fName;
+        instance.benchmark := family;  //.get
+        instance.aggregationReportMode := family.fAggregationReportMode;
+        instance.arg := args;
+        instance.timeUnit := family.fTimeUnit;
+        instance.rangeMultiplier := family.fRangeMultiplier;
+        instance.minTime := family.fMinTime;
+        instance.iterations := family.fIterations;
+        instance.repetitions := family.fRepetitions;
+        instance.measureProcessCpuTime := family.fMeasureProcessCpuTime;
+        instance.useRealTime := family.fUseRealTime;
+        instance.useManualTime := family.fUseManualTime;
+        instance.complexity := family.fComplexity;
+        instance.complexityLambda := family.fComplexityLambda;
+        instance.statistics := family.fStatistics;
+        instance.threads := numThreads;
 
-        if i < Length(family.fArgNames) then
+        // Add arguments to instance name
+        i := 0;
+        for arg in args do
         begin
-          argName := family.fArgNames[i];
-          if argName <> '' then
-            instance.name.args := instance.name.args + Format('%s:', [argName]);
+          if instance.name.args <> '' then
+            instance.name.args := instance.name.args + '/';
+
+          if i < Length(family.fArgNames) then
+          begin
+            argName := family.fArgNames[i];
+            if argName <> '' then
+              instance.name.args := instance.name.args + Format('%s:', [argName]);
+          end;
+
+          instance.name.args := instance.name.args + arg.ToString;
+          Inc(i);
         end;
 
-        instance.name.args := instance.name.args + arg.ToString;
-        Inc(i);
-      end;
+        if not IsZero(family.fMinTime) then
+          instance.name.minTime := Format('minTime:%0.3f', [family.fMinTime]);
+        if family.fIterations <> 0 then
+          instance.name.iterations := Format('iterations:%u', [family.fIterations]);
+        if family.fRepetitions <> 0 then
+          instance.name.pepetitions := Format('repeats:%d', [family.fRepetitions]);
 
-      if not IsZero(family.fMinTime) then
-        instance.name.minTime := Format('minTime:%0.3f', [family.fMinTime]);
-      if family.fIterations <> 0 then
-        instance.name.iterations := Format('iterations:%u', [family.fIterations]);
-      if family.fRepetitions <> 0 then
-        instance.name.pepetitions := Format('repeats:%d', [family.fRepetitions]);
+        if family.fMeasureProcessCpuTime then
+          instance.name.timeType := 'processTime';
 
-      if family.fMeasureProcessCpuTime then
-        instance.name.timeType := 'processTime';
+        if family.fUseManualTime then
+        begin
+          if instance.name.timeType <> '' then
+            instance.name.timeType := instance.name.timeType + '/';
+          instance.name.timeType := instance.name.timeType + 'manualTime';
+        end else if family.fUseRealTime then
+        begin
+          if instance.name.timeType <> '' then
+            instance.name.timeType := instance.name.timeType + '/';
+          instance.name.timeType := instance.name.timeType + 'realTime';
+        end;
 
-      if family.fUseManualTime then
-      begin
-        if instance.name.timeType <> '' then
-          instance.name.timeType := instance.name.timeType + '/';
-        instance.name.timeType := instance.name.timeType + 'manualTime';
-      end else if family.fUseRealTime then
-      begin
-        if instance.name.timeType <> '' then
-          instance.name.timeType := instance.name.timeType + '/';
-        instance.name.timeType := instance.name.timeType + 'realTime';
-      end;
+        // Add the number of threads used to the name
+        if family.fThreadCounts <> nil then
+          instance.name.threads := Format('threads:%d', [instance.threads]);
 
-      // Add the number of threads used to the name
-      if family.fThreadCounts <> nil then
-        instance.name.threads := Format('threads:%d', [instance.threads]);
-
-      fullName := instance.name.Str;
-      if (re.IsMatch(fullName) and not isNegativeFilter) or
-         (not re.IsMatch(fullName) and isNegativeFilter) then
-      begin
-        instance.lastBenchmarkInstance := args = family.fArgs[High(family.fArgs)];
-        benchmarks := benchmarks + [instance];
+        fullName := instance.name.Str;
+        if (re.IsMatch(fullName) and not isNegativeFilter) or
+           (not re.IsMatch(fullName) and isNegativeFilter) then
+        begin
+          instance.lastBenchmarkInstance := args = family.fArgs[High(family.fArgs)];
+          benchmarks := benchmarks + [instance];
+        end;
       end;
     end;
-  end;
 
-//  // Special list of thread counts to use when none are specified
-//  const std::vector<int> one_thread = {1};
-//
-//  MutexLock l(mutex_);
-//  for (std::unique_ptr<Benchmark>& family : families_) {
-//    // Family was deleted or benchmark doesn't match
-//    if (!family) continue;
-//
-//    if (family->ArgsCnt() == -1) {
-//      family->Args({});
-//    }
-//    const std::vector<int>* thread_counts =
-//        (family->thread_counts_.empty()
-//             ? &one_thread
-//             : &static_cast<const std::vector<int>&>(family->thread_counts_));
-//    const size_t family_size = family->args_.size() * thread_counts->size();
-//    // The benchmark will be run at least 'family_size' different inputs.
-//    // If 'family_size' is very large warn the user.
-//    if (family_size > kMaxFamilySize) {
-//      Err << "The number of inputs is very large. " << family->name_
-//          << " will be repeated at least " << family_size << " times.\n";
-//    }
-//    // reserve in the special case the regex ".", since we know the final
-//    // family size.
-//    if (spec == ".") benchmarks->reserve(family_size);
-//
-//    for (auto const& args : family->args_) {
   Result := True;
 end;
 
@@ -3945,11 +4138,8 @@ begin
   minTime := benchmark.minTime; if IsZero(minTime) then minTime := benchmark_min_time;
   repeats := benchmark.repetitions; if repeats = 0 then repeats := benchmark_repetitions;
   hasExplicitIterationCount := benchmark.iterations <> 0;
-//  pool(benchmark.threadCount-1);
-  if hasExplicitIterationCount then
-    iters := benchmark.iterations
-  else
-    iters := 1;
+  SetLength(pool, benchmark.threads - 1);
+  if hasExplicitIterationCount then iters := benchmark.iterations else iters := 1;
 
   runResults.displayReportAggregatesOnly :=
     benchmark_report_aggregates_only or
@@ -3979,40 +4169,61 @@ begin
   end;
 end;
 
-function TBenchmarkRunner.DoNIterations: TIterationResults;
-var
-  i: TIterationResults;
-  manager: TThreadManager;
-begin
-//  VLOG(2) << "Running " << b.name.str() << " for " << iters << "\n";
-//
-//    std::unique_ptr<internal::ThreadManager> manager;
-//    manager.reset(new internal::ThreadManager(b.threads));
-  manager := TThreadManager.Create(benchmark.threads);
-  try
-
-//    // Run all but one thread in separate threads
-//    for (std::size_t ti = 0; ti < pool.size(); ++ti) {
-//      pool[ti] = std::thread(&RunInThread, &b, iters, static_cast<int>(ti + 1),
-//                             manager.get());
-//    }
-  // And run one thread here directly.
-  // (If we were asked to run just one thread, we don't create new threads.)
-  // Yes, we need to do this here *after* we start the separate threads.
-  RunInThread(benchmark, iters, 0, manager);
-
-//    // The main thread has finished. Now let's wait for the other threads.
-//    manager->WaitForAllThreads();
-//    for (std::thread& thread : pool) thread.join();
-//
-  // Acquire the measurements/counters from the manager, UNDER THE LOCK!
-//  MutexLock l(manager->GetBenchmarkMutex());
-  try
-    i.results := manager.Results;
-  finally
-    // todo (sg): unlock
+type
+  TBenchmarkThread = class(TThread)
+  private
+    fBenchmark: ^TBenchmarkInstance;
+    fIters: TIterationCount;
+    fThreadId: Integer;
+    fManager: TThreadManager;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const benchmark: TBenchmarkInstance; iters: TIterationCount;
+      threadId: Integer; const manager: TThreadManager);
   end;
 
+constructor TBenchmarkThread.Create(const benchmark: TBenchmarkInstance;
+  iters: TIterationCount; threadId: Integer; const manager: TThreadManager);
+begin
+  inherited Create(False);
+  fBenchmark := @benchmark;
+  fIters := iters;
+  fThreadId := threadId;
+  fManager := manager;
+end;
+
+procedure TBenchmarkThread.Execute;
+begin
+  RunInThread(fBenchmark^, fIters, fThreadId, fManager);
+end;
+
+function TBenchmarkRunner.DoNIterations: TIterationResults;
+var
+  ti: Integer;
+  manager: TThreadManager;
+  i: TIterationResults;
+begin
+//  VLOG(2) << "Running " << b.name.str() << " for " << iters << "\n";
+
+  manager := TThreadManager.Create(benchmark.threads);
+  try
+    // Run all but one thread in separate threads
+    for ti := 0 to High(pool) do
+      pool[ti] := TBenchmarkThread.Create(benchmark, iters, ti + 1, manager);
+
+    // And run one thread here directly.
+    // (If we were asked to run just one thread, we don't create new threads.)
+    // Yes, we need to do this here *after* we start the separate threads.
+    RunInThread(benchmark, iters, 0, manager);
+
+    // The main thread has finished. Now let's wait for the other threads.
+    manager.WaitForAllThreads;
+    for ti := 0 to High(pool) do
+      pool[ti].Free;
+
+    // Acquire the measurements/counters from the manager
+    i.results := manager.Results;
   finally
     // And get rid of the manager.
     manager.Free;
@@ -4038,6 +4249,51 @@ begin
     i.seconds := i.results.RealTimeUsed;
 
   Result := i;
+end;
+
+function TBenchmarkRunner.PredictNumItersNeeded(
+  const i: TIterationResults): TIterationCount;
+var
+  multiplier: Double;
+  isSignificant: Boolean;
+  maxNextIters, nextIters: TIterationCount;
+begin
+  // See how much iterations should be increased by.
+  // Note: Avoid division by zero with max(seconds, 1ns).
+  multiplier := minTime * 1.4 / Max(i.seconds, 1e-9);
+  // If our last run was at least 10% of FLAGS_benchmark_min_time then we
+  // use the multiplier directly.
+  // Otherwise we use at most 10 times expansion.
+  // NOTE: When the last run was at least 10% of the min time the max
+  // expansion should be 14x.
+  isSignificant := (i.seconds / minTime) > 0.1;
+  if not isSignificant then
+    multiplier := Min(10.0, multiplier);
+  if multiplier <= 1.0 then
+    multiplier := 2.0;
+
+  // So what seems to be the sufficiently-large iteration count? Round up.
+  maxNextIters := Round(Max(multiplier * i.iters, i.iters + 1));
+  // But we do have *some* sanity limits though..
+  nextIters := Min(maxNextIters, kMaxIterations);
+
+//    VLOG(3) << "Next iters: " << next_iters << ", " << multiplier << "\n";
+  Result := nextIters;
+end;
+
+function TBenchmarkRunner.ShouldReportIterationResults(
+  const i: TIterationResults): Boolean;
+begin
+  // Determine if this run should be reported;
+  // Either it has run for a sufficient amount of time
+  // or because an error was reported.
+  Result := i.results.hasError or
+            (i.iters >= kMaxIterations) or  // Too many iterations already.
+            (i.seconds >= minTime) or       // The elapsed time is large enough.
+            // CPU time is specified but the elapsed real time greatly exceeds
+            // the minimum time.
+            // Note that user provided timers are except from this sanity check.
+            ((i.results.realTimeUsed >= 5 * minTime) and not benchmark.useManualTime);
 end;
 
 procedure TBenchmarkRunner.DoOneRepetition(repetitionIndex: Int64);
@@ -4110,51 +4366,6 @@ end;
 function TBenchmarkRunner.GetResults: TRunResults;
 begin
   Result := runResults;
-end;
-
-function TBenchmarkRunner.PredictNumItersNeeded(
-  const i: TIterationResults): TIterationCount;
-var
-  multiplier: Double;
-  isSignificant: Boolean;
-  maxNextIters, nextIters: TIterationCount;
-begin
-  // See how much iterations should be increased by.
-  // Note: Avoid division by zero with max(seconds, 1ns).
-  multiplier := minTime * 1.4 / Max(i.seconds, 1e-9);
-  // If our last run was at least 10% of FLAGS_benchmark_min_time then we
-  // use the multiplier directly.
-  // Otherwise we use at most 10 times expansion.
-  // NOTE: When the last run was at least 10% of the min time the max
-  // expansion should be 14x.
-  isSignificant := (i.seconds / minTime) > 0.1;
-  if not isSignificant then
-    multiplier := Min(10.0, multiplier);
-  if multiplier <= 1.0 then
-    multiplier := 2.0;
-
-  // So what seems to be the sufficiently-large iteration count? Round up.
-  maxNextIters := Round(Max(multiplier * i.iters, i.iters + 1));
-  // But we do have *some* sanity limits though..
-  nextIters := Min(maxNextIters, kMaxIterations);
-
-//    VLOG(3) << "Next iters: " << next_iters << ", " << multiplier << "\n";
-  Result := nextIters;
-end;
-
-function TBenchmarkRunner.ShouldReportIterationResults(
-  const i: TIterationResults): Boolean;
-begin
-  // Determine if this run should be reported;
-  // Either it has run for a sufficient amount of time
-  // or because an error was reported.
-  Result := i.results.hasError or
-            (i.iters >= kMaxIterations) or  // Too many iterations already.
-            (i.seconds >= minTime) or       // The elapsed time is large enough.
-            // CPU time is specified but the elapsed real time greatly exceeds
-            // the minimum time.
-            // Note that user provided timers are except from this sanity check.
-            ((i.results.realTimeUsed >= 5 * minTime) and not benchmark.useManualTime);
 end;
 
 {$ENDREGION}
