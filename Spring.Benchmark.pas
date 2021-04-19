@@ -33,6 +33,7 @@ unit Spring.Benchmark;
   {$IFOPT D+}{$DEFINE DEBUG}{$ENDIF}
   {$MODE DELPHI}
   {$ASMMODE INTEL}
+  {$DEFINE HAS_RECORD_FINALIZER}
   {$NOTES OFF}
   {$HINTS OFF}
   {$WARNINGS OFF}
@@ -82,7 +83,12 @@ type
     procedure WaitFor(criticalSection: TCriticalSection);
   end;
 {$ELSE}
+  {$IFDEF MSWINDOWS}
   TConditionVariable = TConditionVariableCS;
+  {$ELSE}
+  TConditionVariable = TConditionVariableMutex;
+  TCriticalSection = TMutex;
+  {$ENDIF}
 {$ENDIF}
 
   PCounter = ^TCounter;
@@ -133,7 +139,7 @@ const
 
 type
   TUserCounter = record name: string; counter: TCounter end;
-  TUserCounters = TArray<TUserCounter>;
+  TUserCounters = array of TUserCounter;
   TUserCountersHelper = record helper for TUserCounters
     function Find(const name: string): PCounter;
     function Get(const name: string): PCounter;
@@ -142,7 +148,7 @@ type
   PCounterStat = ^TCounterStat;
   TCounterStat = record c: TCounter; s: TArray<Double>; end;
   TCounterStatsItem = record name: string; counter: TCounterStat end;
-  TCounterStats = TArray<TCounterStatsItem>;
+  TCounterStats = array of TCounterStatsItem;
   TCounterStatsHelper = record helper for TCounterStats
     function Find(const name: string): PCounterStat;
     function Get(const name: string): PCounterStat;
@@ -282,6 +288,9 @@ type
     public
       function MoveNext: Boolean; inline;
     {$IFDEF HAS_RECORD_FINALIZER}
+    {$IFDEF FPC}
+      class operator Initialize(var iter: TStateIterator);
+    {$ENDIF}
       class operator Finalize(var iter: TStateIterator);
     {$ENDIF}
       property Current: TValue read fCurrent;
@@ -3228,8 +3237,18 @@ end;
 {$REGION 'TState.TStateIterator'}
 
 {$IFDEF HAS_RECORD_FINALIZER}
+{$IFDEF FPC}
+class operator TState.TStateIterator.Initialize(var iter: TStateIterator);
+begin
+  iter := Default(TStateIterator);
+end;
+{$ENDIF}
+
 class operator TState.TStateIterator.Finalize(var iter: TStateIterator);
 begin
+  {$IFDEF FPC}
+  if Assigned(iter.fParent) then
+  {$ENDIF}
   iter.fParent.FinishKeepRunning;
 end;
 {$ENDIF}
@@ -3619,6 +3638,7 @@ var
 //  errorMsg: string;
   re: TRegEx;
   isNegativeFilter: Boolean;
+  p: Pointer;
   family: TBenchmark;
   threadCounts: TArray<Integer>;
   familySize: Integer;
@@ -3638,8 +3658,9 @@ begin
   end;
   re := TRegex.Create(spec);
 
-  for family in fFamilies do
+  for p in fFamilies do
   begin
+    family := p;
     if family.ArgsCount = -1 then
       family.fArgs := [[]];
 
