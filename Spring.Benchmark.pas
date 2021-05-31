@@ -810,7 +810,7 @@ type
     class function AddBenchmark(const family: TBenchmark): Integer;
     class procedure ClearBenchmarks;
     class function FindBenchmarks(spec: string;
-      var benchmarks: TArray<TBenchmarkInstance>; var Err: System.Text): Boolean;
+      var benchmarks: TArray<TBenchmarkInstance>): Boolean;
   end;
 
   TBenchmarkReporter = class
@@ -1036,6 +1036,96 @@ function AtomicDecrement(var target: Integer): Integer; external name 'FPC_INTER
 {$ENDREGION}
 
 
+{$REGION 'Colored and formatted output for console'}
+
+// ported from: colorprint.h
+
+type
+  TColor = (
+    clDefault,
+    clRed,
+    clGreen,
+    clYellow,
+    clBlue,
+    clMagenta,
+    clCyan,
+    clWhite
+  );
+
+procedure Write(const msg: string; const args: array of const; color: TColor = clWhite); overload;
+const
+{$IFDEF MSWINDOWS}
+  PlatformColorCodes: array[TColor] of Word = (
+    FOREGROUND_INTENSITY,
+    FOREGROUND_RED,
+    FOREGROUND_GREEN,
+    FOREGROUND_RED or FOREGROUND_GREEN,
+    FOREGROUND_BLUE,
+    FOREGROUND_BLUE or FOREGROUND_RED,
+    FOREGROUND_BLUE or FOREGROUND_GREEN,
+    FOREGROUND_BLUE or FOREGROUND_GREEN or FOREGROUND_RED or FOREGROUND_INTENSITY
+  );
+{$ELSE}
+  PlatformColorCodes: array[TColor] of Char = (#0, '1', '2', '3', '4', '5', '6', '7');
+{$ENDIF}
+{$IFDEF MSWINDOWS}
+var
+  stdOutHandle: THandle;
+  bufferInfo: TConsoleScreenBufferInfo;
+  oldColorAttributes: Word;
+begin
+  stdOutHandle := GetStdHandle(STD_OUTPUT_HANDLE);
+
+  // Gets the current text color.
+  GetConsoleScreenBufferInfo(stdOutHandle, bufferInfo);
+  oldColorAttributes := bufferInfo.wAttributes;
+
+  if oldColorAttributes < 16 then
+  begin
+    // We need to flush the stream buffers into the console before each
+    // SetConsoleTextAttribute call lest it affect the text that is already
+    // printed but has not yet reached the console.
+    Flush(Output);
+    SetConsoleTextAttribute(stdOutHandle, PlatformColorCodes[color]);
+  end;
+
+  System.Write(Format(msg, args));
+  Flush(Output);
+
+  // Restores the text color.
+  if oldColorAttributes < 16 then
+    SetConsoleTextAttribute(stdOutHandle, oldColorAttributes);
+end;
+{$ELSE}
+var
+  colorCode: string;
+begin
+  colorCode := PlatformColorCodes[color];
+  if colorCode <> #0 then
+    System.Write(Format(#27'[0;3%sm', [colorCode]));
+  System.Write(Format(msg, args) + #27'[m');
+end;
+{$ENDIF}
+
+
+procedure Write(const msg: string; color: TColor = clWhite); inline; overload;
+begin
+  Write(msg, [], color);
+end;
+
+procedure WriteLine(const msg: string; const args: array of const; color: TColor = clWhite); overload;
+begin
+  Write(msg + sLineBreak, args, color);
+end;
+
+procedure WriteLine(const msg: string = ''; color: TColor = clWhite); inline; overload;
+begin
+  Write(msg + sLineBreak, [], color);
+end;
+
+{$ENDREGION}
+
+
 {$REGION 'Commandline flags'}
 
 // ported from benchmark.cc, commandlineflags.cc
@@ -1122,8 +1212,8 @@ begin
   // Sets value to the value of the flag.
   Result := TryStrToInt(valueStr, value);
   if not Result then
-    Writeln(ErrOutput, 'The value of flag --', flag, 'is expected to be a 32-bit integer, ' +
-                       'but actually has value "', valueStr, '".');
+    WriteLine('The value of flag --%s is expected to be a 32-bit integer, ' +
+              'but actually has value "%s".', [flag, valueStr]);
 end;
 
 function ParseDoubleFlag(const str, flag: string; var value: Double): Boolean;
@@ -1139,8 +1229,8 @@ begin
   // Sets value to the value of the flag.
   Result := TryStrToFloat(valueStr, value);
   if not Result then
-    Writeln(ErrOutput, 'The value of flag --', flag, 'is expected to be a double, ' +
-                       'but actually has value "', valueStr, '".');
+    WriteLine('The value of flag --%s is expected to be a double, ' +
+              'but actually has value "%s".', [flag, valueStr]);
 end;
 
 function ParseStringFlag(const str, flag: string; var value: string): Boolean;
@@ -1159,19 +1249,19 @@ end;
 
 procedure PrintUsageAndExit;
 begin
-  Writeln(
-          'benchmark',sLineBreak,
-          ' [--benchmark_list_tests={true|false}]',sLineBreak,
-          '          [--benchmark_filter=<regex>]',sLineBreak,
-          '          [--benchmark_min_time=<min_time>]',sLineBreak,
-          '          [--benchmark_repetitions=<num_repetitions>]',sLineBreak,
-          '          [--benchmark_report_aggregates_only={true|false}]',sLineBreak,
-          '          [--benchmark_display_aggregates_only={true|false}]',sLineBreak,
-          '          [--benchmark_format=<console|json|csv>]',sLineBreak,
-          '          [--benchmark_out=<filename>]',sLineBreak,
-          '          [--benchmark_out_format=<json|console|csv>]',sLineBreak,
-          '          [--benchmark_color={auto|true|false}]',sLineBreak,
-          '          [--benchmark_counters_tabular={true|false}]',sLineBreak,
+  WriteLine(
+          'benchmark' + sLineBreak +
+          ' [--benchmark_list_tests={true|false}]' + sLineBreak +
+          '          [--benchmark_filter=<regex>]' + sLineBreak +
+          '          [--benchmark_min_time=<min_time>]' + sLineBreak +
+          '          [--benchmark_repetitions=<num_repetitions>]' + sLineBreak +
+          '          [--benchmark_report_aggregates_only={true|false}]' + sLineBreak +
+          '          [--benchmark_display_aggregates_only={true|false}]' + sLineBreak +
+          '          [--benchmark_format=<console|json|csv>]' + sLineBreak +
+          '          [--benchmark_out=<filename>]' + sLineBreak +
+          '          [--benchmark_out_format=<json|console|csv>]' + sLineBreak +
+          '          [--benchmark_color={auto|true|false}]' + sLineBreak +
+          '          [--benchmark_counters_tabular={true|false}]' + sLineBreak +
           '          [--log_level=<verbosity>]');
   Halt(0);
 end;
@@ -1210,7 +1300,7 @@ begin
         PrintUsageAndExit
       else
       begin
-        Writeln(ErrOutput, 'error: unrecognozed command-line flag: ', arg);
+        WriteLine('error: unrecognozed command-line flag: ' + arg);
         Halt(1);
       end;
   end;
@@ -1231,7 +1321,7 @@ const
   EXIT_SUCCESS = 0;
   EXIT_FAILURE = 8;
 begin
-  Writeln(ErrOutput, msg);
+  WriteLine(msg);
   Halt(EXIT_FAILURE);
 end;
 
@@ -1291,98 +1381,6 @@ begin
   SetLength(Self, i + 1);
   Self[i].name := name;
   Result := @Self[i].counter;
-end;
-
-{$ENDREGION}
-
-
-{$REGION 'Colored and formatted output for console'}
-
-// ported from: colorprint.h
-
-type
-  TColor = (
-    clDefault,
-    clRed,
-    clGreen,
-    clYellow,
-    clBlue,
-    clMagenta,
-    clCyan,
-    clWhite
-  );
-
-procedure Write(const msg: string; const args: array of const; color: TColor = clWhite); overload;
-const
-{$IFDEF MSWINDOWS}
-  PlatformColorCodes: array[TColor] of Word = (
-    FOREGROUND_INTENSITY,
-    FOREGROUND_RED,
-    FOREGROUND_GREEN,
-    FOREGROUND_RED or FOREGROUND_GREEN,
-    FOREGROUND_BLUE,
-    FOREGROUND_BLUE or FOREGROUND_RED,
-    FOREGROUND_BLUE or FOREGROUND_GREEN,
-    FOREGROUND_BLUE or FOREGROUND_GREEN or FOREGROUND_RED or FOREGROUND_INTENSITY
-  );
-{$ELSE}
-  PlatformColorCodes: array[TColor] of Char = (#0, '1', '2', '3', '4', '5', '6', '7');
-{$ENDIF}
-{$IFDEF MSWINDOWS}
-var
-  stdOutHandle: THandle;
-  bufferInfo: TConsoleScreenBufferInfo;
-  oldColorAttributes: Word;
-begin
-  stdOutHandle := GetStdHandle(STD_OUTPUT_HANDLE);
-
-  // Gets the current text color.
-  GetConsoleScreenBufferInfo(stdOutHandle, bufferInfo);
-  oldColorAttributes := bufferInfo.wAttributes;
-
-  if oldColorAttributes < 16 then
-  begin
-    // We need to flush the stream buffers into the console before each
-    // SetConsoleTextAttribute call lest it affect the text that is already
-    // printed but has not yet reached the console.
-    Flush(Output);
-    SetConsoleTextAttribute(stdOutHandle, PlatformColorCodes[color]);
-  end;
-
-  System.Write(Format(msg, args));
-  Flush(Output);
-
-  // Restores the text color.
-  if oldColorAttributes < 16 then
-    SetConsoleTextAttribute(stdOutHandle, oldColorAttributes);
-end;
-{$ELSE}
-var
-  colorCode: string;
-begin
-  colorCode := PlatformColorCodes[color];
-  if colorCode <> #0 then
-    System.Write(Format(#27'[0;3%sm', [colorCode]));
-  System.Write(Format(msg, args) + #27'[m');
-end;
-{$ENDIF}
-
-
-procedure Write(const msg: string; color: TColor = clWhite); inline; overload;
-begin
-  Write(msg, [], color);
-end;
-
-procedure WriteLine(const msg: string; const args: array of const; color: TColor = clWhite); overload;
-begin
-  Write(msg, args, color);
-  Writeln;
-end;
-
-procedure WriteLine(const msg: string; color: TColor = clWhite); inline; overload;
-begin
-  Write(msg, [], color);
-  Writeln;
 end;
 
 {$ENDREGION}
@@ -2464,7 +2462,7 @@ begin
     Result := TCSVReporter.Create
   else
   begin
-    Writeln(ErrOutput, 'Unexpected format: "', name, '"');
+    WriteLine('Unexpected format: "%s"', [name]);
     Halt(1);
     Result := nil;
   end;
@@ -2641,8 +2639,8 @@ begin
   fileName := benchmark_out;
   if (fileName = '') and (fileReporter <> nil) then
   begin
-    Writeln(ErrOutput, 'A custom file reporter was provided but ' +
-                       '--benchmark_out=<file> was not specified.');
+    WriteLine('A custom file reporter was provided but ' +
+              '--benchmark_out=<file> was not specified.');
     Halt(1);
   end;
 
@@ -2664,17 +2662,17 @@ begin
   else
     outputFile := nil;
 
-  if not TBenchmarkFamilies.FindBenchmarks(spec, benchmarks, ErrOutput) then Exit(0);
+  if not TBenchmarkFamilies.FindBenchmarks(spec, benchmarks) then Exit(0);
 
   if benchmarks = nil then
   begin
-    Writeln(ErrOutput, 'Failed to match any benchmarks against regex: ', spec);
+    WriteLine('Failed to match any benchmarks against regex: ' + spec);
     Exit(0);
   end;
 
   if benchmark_list_tests then
     for i := 0 to High(benchmarks) do
-      Writeln(benchmarks[i].name.str)
+      WriteLine(benchmarks[i].name.str)
   else
     RunBenchmarks(benchmarks, displayReporter, fileReporter);
 
@@ -3640,7 +3638,7 @@ begin
 end;
 
 class function TBenchmarkFamilies.FindBenchmarks(spec: string;
-  var benchmarks: TArray<TBenchmarkInstance>; var Err: System.Text): Boolean;
+  var benchmarks: TArray<TBenchmarkInstance>): Boolean;
 const
   oneThread = 1;
 var
@@ -3680,8 +3678,8 @@ begin
     familySize := Length(family.fArgs) * Length(threadCounts);
     // The benchmark will be run at least 'family_size' different inputs.
     if familySize > kMaxFamilySize then
-      Writeln(Err, 'The number of inputs is very large. ', family.fName,
-                   ' will be repeated at least ', familySize, ' times.');
+      WriteLine('The number of inputs is very large. %s ' +
+                'will be repeated at least %d times.', [family.fName, familySize]);
 
     for args in family.fArgs do
       for numThreads in threadCounts do
@@ -3790,7 +3788,7 @@ begin
       Write('  L%d %s %d K', [info.caches[i].level, info.caches[i].typ, info.caches[i].size div 1024]);
       if info.caches[i].numSharing <> 0 then
         Write(' (x%d)', [info.numCpus div info.caches[i].numSharing]);
-      Writeln;
+      WriteLine;
     end;
   end;
 
@@ -3802,7 +3800,7 @@ begin
       Write('%.2f', [info.loadAvg[i]]);
       if i < High(info.loadAvg) then Write(', ');
     end;
-    Writeln;
+    WriteLine;
   end;
 
   if TCPUInfo.TScaling.Enabled = info.scaling then
@@ -3998,7 +3996,7 @@ begin
   if result.reportLabel <> '' then
     Write(result.reportLabel);
 
-  Writeln;
+  WriteLine;
 end;
 
 {$ENDREGION}
