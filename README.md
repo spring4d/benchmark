@@ -1,6 +1,6 @@
 # Benchmark
 
-Delphi port of [Google Benchmark](https://github.com/google/benchmark)
+Delphi port of [Google Benchmark](https://github.com/google/benchmark) - v1.5.3
 
 Hello everyone - you are amongst the few selected people to get a preview to help test things out and give some feedback, welcome!
 
@@ -10,7 +10,6 @@ That means I will be reluctant to add a lot of features but aim at making work w
 This readme is WIP - most features are implemented and working - currently missing:
 
 - file output (csv done, json missing)
-- multithreaded testing
 
 Known issues:
 
@@ -46,7 +45,7 @@ end;
 
 begin
   // Register the function as a benchmark
-  Benchmark(BM_SomeFunction);
+  Benchmark(BM_SomeFunction, 'SomeFunction');
   // Run the benchmark
   Benchmark_Main;
 end.
@@ -56,7 +55,7 @@ To get started, simply add `Spring.Benchmark` to the uses.
 
 ## Requirements
 
-The library can be used with Delphi XE7 or higher.
+The library can be used with Delphi XE7 or higher and FPC 3.2.0 or higher.
 
 ## Installation
 
@@ -82,13 +81,7 @@ Actually there is no installation. Simply add the unit to the uses clause and yo
 
 [Passing Arguments](#passing-arguments)
 
-[Custom Benchmark Name](#custom-benchmark-name)
-
 [Calculating Asymptotic Complexity](#asymptotic-complexity)
-
-[Templated Benchmarks](#templated-benchmarks)
-
-[Fixtures](#fixtures)
 
 [Custom Counters](#custom-counters)
 
@@ -109,10 +102,6 @@ Actually there is no installation. Simply add the unit to the uses clause and yo
 [Using RegisterBenchmark](#using-register-benchmark)
 
 [Exiting with an Error](#exiting-with-an-error)
-
-[A Faster KeepRunning Loop](#a-faster-keep-running-loop)
-
-[Disabling CPU Frequency Scaling](#disabling-cpu-frequency-scaling)
 
 
 <a name="output-formats" />
@@ -242,7 +231,7 @@ QuickSort/8192      13081 ns        12277 ns        56000
 ### Result comparison
 
 It is possible to compare the benchmarking results.
-See [Additional Tooling Documentation](docs/tools.md)
+See [Additional Tooling Documentation](https://github.com/google/benchmark/blob/main/docs/tools.md)
 
 <a name="runtime-and-reporting-considerations" />
 
@@ -290,7 +279,7 @@ begin
     TArray.Sort<Integer>(numbers);
 end;
 
-Benchmark(BM_QuickSort).Arg(8).Arg(64).Arg(512).Arg(1024).Arg(8192);
+Benchmark(BM_QuickSort, 'QuickSort').Arg(8).Arg(64).Arg(512).Arg(1024).Arg(8192);
 ```
 
 The preceding code is quite repetitive, and can be replaced with the following
@@ -298,7 +287,7 @@ short-hand. The following invocation will pick a few appropriate arguments in
 the specified range and will generate a benchmark for each such argument.
 
 ```delphi
-Benchmark(BM_QuickSort).Range(8, 8192);
+Benchmark(BM_QuickSort, 'QuickSort').Range(8, 8192);
 ```
 
 By default the arguments in the range are generated in multiples of eight and
@@ -306,7 +295,7 @@ the command above selects [ 8, 64, 512, 1024, 8192 ]. In the following code the
 range multiplier is changed to multiples of two.
 
 ```delphi
-Benchmark(BM_QuickSort).RangeMultiplier(2).Range(8, 8192);
+Benchmark(BM_QuickSort, 'QuickSort').RangeMultiplier(2).Range(8, 8192);
 ```
 
 Now arguments generated are [ 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192 ].
@@ -325,6 +314,7 @@ begin
   GetMem(p, n * 4);
   for var _ in state do
     FillChar(p^, n * 4, 0);
+  FreeMem(p);  
 end;
 
 Benchmark(BM_DenseRange).DenseRange(0, 1024, 128);
@@ -351,7 +341,7 @@ begin
   end;
 end;
 
-Benchmark(BM_SetInsert)
+Benchmark(BM_SetInsert, 'SetInsert')
     .Args([1024, 128])
     .Args([2048, 128])
     .Args([4096, 128])
@@ -368,7 +358,7 @@ product of the two specified ranges and will generate a benchmark for each such
 pair.
 
 ```delphi
-Benchmark(BM_SetInsert).Ranges([[1024, 8192], [128, 512]]);
+Benchmark(BM_SetInsert, 'SetInsert').Ranges([Range(1024, 8192), Range(128, 512)]);
 ```
 
 Some benchmarks may require specific argument values that cannot be expressed
@@ -376,7 +366,7 @@ with `Ranges`. In this case, `ArgsProduct` offers the ability to generate a
 benchmark input for each combination in the product of the supplied vectors.
 
 ```delphi
-Benchmark(BM_SetInsert)
+Benchmark(BM_SetInsert, 'SetInsert')
     .ArgsProduct([[1024, 3072, 8192], [20, 40, 60, 80]]);
 // would generate the same benchmark arguments as
 Benchmark(BM_SetInsert)
@@ -412,7 +402,7 @@ begin
   end;
 end;    
 
-Benchmark(BM_SetInsert).Apply(CustomArguments);
+Benchmark(BM_SetInsert, 'SetInsert').Apply(CustomArguments);
 ```
 
 <a name="asymptotic-complexity" />
@@ -436,7 +426,7 @@ begin
 end;
 
 begin
-  Benchmark(BM_StringCompare)
+  Benchmark(BM_StringCompare, 'StringCompare')
     .RangeMultiplier(2).Range(1024, 1 shl 18).Complexity(oN);
 ```
 
@@ -444,7 +434,7 @@ As shown in the following invocation, asymptotic complexity might also be
 calculated automatically.
 
 ```delphi
-Benchmark(BM_StringCompare)
+Benchmark(BM_StringCompare, 'StringCompare')
     .RangeMultiplier(2).Range(1024, 1 shl 18).Complexity;
 ```
 
@@ -452,7 +442,7 @@ The following code will specify asymptotic complexity with an anonymous method,
 that might be used to customize high-order term calculation.
 
 ```delphi
-Benchmark(BM_StringCompare).RangeMultiplier(2)
+Benchmark(BM_StringCompare, 'StringCompare').RangeMultiplier(2)
     .Range(1024, 1 shl 18).Complexity(function(const n: TIterationCount): Double begin Result := n end);
 ```
 
@@ -494,27 +484,27 @@ is 1k a 1000 (default, `kIs1000`), or 1024 (`kIs1024`)?
 
 ```delphi
   // sets a simple counter
-  state.Counters['Foo'] = numFoos;
+  state.Counters['Foo'] := numFoos;
 
   // Set the counter as a rate. It will be presented divided
   // by the duration of the benchmark.
   // Meaning: per one second, how many 'foo's are processed?
-  state.Counters['FooRate'] = Counter(numFoos, [kIsRate]);
+  state.Counters['FooRate'] := Counter(numFoos, [kIsRate]);
 
   // Set the counter as a rate. It will be presented divided
   // by the duration of the benchmark, and the result inverted.
   // Meaning: how many seconds it takes to process one 'foo'?
-  state.Counters['FooInvRate'] = Counter(numFoos, [kIsRate kInvert]);
+  state.Counters['FooInvRate'] := Counter(numFoos, [kIsRate, kInvert]);
 
   // Set the counter as a thread-average quantity. It will
   // be presented divided by the number of threads.
-  state.Counters['FooAvg'] = Counter(numFoos, [kAvgThreads]);
+  state.Counters['FooAvg'] := Counter(numFoos, [kAvgThreads]);
 
   // There's also a combined flag:
-  state.Counters['FooAvgRate'] = Counter(numFoos, kAvgThreadsRate);
+  state.Counters['FooAvgRate'] := Counter(numFoos, kAvgThreadsRate);
 
-  // This says that we process with the rate of state.range(0) bytes every iteration:
-  state.Counters['BytesProcessed'] = Counter(state.range(0), kIsIterationInvariantRate, kIs1024);
+  // This says that we process with the rate of state.Range[0] bytes every iteration:
+  state.Counters['BytesProcessed'] := Counter(state.Range[0], kIsIterationInvariantRate, kIs1024);
 ```
 
 #### Counter Reporting
@@ -598,27 +588,28 @@ exits the benchmark loop. (This behavior is also provided by the `KeepRunning()`
 API) As such, any global setup or teardown can be wrapped in a check against the thread
 index:
 
-```c++
-static void BM_MultiThreaded(benchmark::State& state) {
-  if (state.thread_index == 0) {
+```delphi
+procedure BM_MultiThreaded(const state: TState);
+begin
+  if state.ThreadIndex = 0 then
     // Setup code here.
-  }
-  for (auto _ : state) {
+
+  for var _ in state do
     // Run the test as normal.
-  }
-  if (state.thread_index == 0) {
+
+  if state.ThreadIndex = 0 then
     // Teardown code here.
-  }
-}
-BENCHMARK(BM_MultiThreaded)->Threads(2);
+end;
+
+Benchmark(BM_MultiThreaded, 'BM_MultiThreaded').Threads(2);
 ```
 
 If the benchmarked code itself uses threads and you want to compare it to
 single-threaded code, you may want to use real-time ("wallclock") measurements
 for latency comparisons:
 
-```c++
-BENCHMARK(BM_test)->Range(8, 8<<10)->UseRealTime();
+```delphi
+Benchmark(BM_test, 'test').Range(8, 8 shl 10).UseRealTime;
 ```
 
 Without `UseRealTime`, CPU time is used by default.
@@ -632,63 +623,53 @@ If the benchmark itself uses threads internally, this measurement may not
 be what you are looking for. Instead, there is a way to measure the total
 CPU usage of the process, by all the threads.
 
-```c++
-void callee(int i);
-
-static void MyMain(int size) {
-#pragma omp parallel for
-  for(int i = 0; i < size; i++)
-    callee(i);
-}
-
-static void BM_OpenMP(benchmark::State& state) {
-  for (auto _ : state)
-    MyMain(state.range(0));
-}
-
+```delphi
 // Measure the time spent by the main thread, use it to decide for how long to
 // run the benchmark loop. Depending on the internal implementation detail may
 // measure to anywhere from near-zero (the overhead spent before/after work
 // handoff to worker thread[s]) to the whole single-thread time.
-BENCHMARK(BM_OpenMP)->Range(8, 8<<10);
+Benchmark(BM_ParallelFor, 'ParallelFor').Range(8, 8 shl 10);
 
 // Measure the user-visible time, the wall clock (literally, the time that
 // has passed on the clock on the wall), use it to decide for how long to
-// run the benchmark loop. This will always be meaningful, an will match the
+// run the benchmark loop. This will always be meaningful, and will match the
 // time spent by the main thread in single-threaded case, in general decreasing
 // with the number of internal threads doing the work.
-BENCHMARK(BM_OpenMP)->Range(8, 8<<10)->UseRealTime();
+Benchmark(BM_ParallelFor, 'ParallelFor').Range(8, 8 shl 10).UseRealTime;
 
 // Measure the total CPU consumption, use it to decide for how long to
 // run the benchmark loop. This will always measure to no less than the
 // time spent by the main thread in single-threaded case.
-BENCHMARK(BM_OpenMP)->Range(8, 8<<10)->MeasureProcessCPUTime();
+Benchmark(BM_ParallelFor, 'ParallelFor').Range(8, 8 shl 10).MeasureProcessCPUTime;
 
 // A mixture of the last two. Measure the total CPU consumption, but use the
 // wall clock to decide for how long to run the benchmark loop.
-BENCHMARK(BM_OpenMP)->Range(8, 8<<10)->MeasureProcessCPUTime()->UseRealTime();
+Benchmark(BM_ParallelFor, 'ParallelFor').Range(8, 8 shl 10).MeasureProcessCPUTime.UseRealTime;
 ```
 
 #### Controlling Timers
 
-Normally, the entire duration of the work loop (`for (auto _ : state) {}`)
+Normally, the entire duration of the work loop (`for var _ in state do`)
 is measured. But sometimes, it is necessary to do some work inside of
 that loop, every iteration, but without counting that time to the benchmark time.
 That is possible, although it is not recommended, since it has high overhead.
 
-```c++
-static void BM_SetInsert_With_Timer_Control(benchmark::State& state) {
-  std::set<int> data;
-  for (auto _ : state) {
-    state.PauseTiming(); // Stop timers. They will not count until they are resumed.
-    data = ConstructRandomSet(state.range(0)); // Do something that should not be measured
-    state.ResumeTiming(); // And resume timers. They are now counting again.
+```delphi
+procedure BM_SetInsert_With_Timer_Control(const state: TState);
+var
+  data: ISet<Integer>;
+begin
+  for var _ in state do
+  begin
+    state.PauseTiming; // Stop timers. They will not count until they are resumed.
+    data = ConstructRandomSet(state.Range[0]); // Do something that should not be measured
+    state.ResumeTiming; // And resume timers. They are now counting again.
     // The rest will be measured.
-    for (int j = 0; j < state.range(1); ++j)
+    for var j := 0 to state.range[1] - 1 do
       data.insert(RandomNumber());
   }
 }
-BENCHMARK(BM_SetInsert_With_Timer_Control)->Ranges({{1<<10, 8<<10}, {128, 512}});
+Benchmark(BM_SetInsert_With_Timer_Control, 'SetInsert').Ranges([Range(1 shl 10, 8 shl 10), Range(128, 512)]);
 ```
 
 <a name="manual-timing" />
@@ -709,29 +690,6 @@ be accurately measured using CPU time or real-time. Instead, they can be
 measured accurately using a dedicated API, and these measurement results
 can be reported back with `SetIterationTime`.
 
-```c++
-static void BM_ManualTiming(benchmark::State& state) {
-  int microseconds = state.range(0);
-  std::chrono::duration<double, std::micro> sleep_duration {
-    static_cast<double>(microseconds)
-  };
-
-  for (auto _ : state) {
-    auto start = std::chrono::high_resolution_clock::now();
-    // Simulate some useful workload with a sleep
-    std::this_thread::sleep_for(sleep_duration);
-    auto end = std::chrono::high_resolution_clock::now();
-
-    auto elapsed_seconds =
-      std::chrono::duration_cast<std::chrono::duration<double>>(
-        end - start);
-
-    state.SetIterationTime(elapsed_seconds.count());
-  }
-}
-BENCHMARK(BM_ManualTiming)->Range(1, 1<<17)->UseManualTime();
-```
-
 <a name="setting-the-time-unit" />
 
 ### Setting the Time Unit
@@ -740,8 +698,8 @@ If a benchmark runs a few milliseconds it may be hard to visually compare the
 measured times, since the output data is given in nanoseconds per default. In
 order to manually set the time unit, you can specify it manually:
 
-```c++
-BENCHMARK(BM_test)->Unit(benchmark::kMillisecond);
+```delphi
+Benchmark(BM_test, 'test').TimeUnit(kMillisecond);
 ```
 
 <a name="preventing-optimization" />
@@ -749,61 +707,24 @@ BENCHMARK(BM_test)->Unit(benchmark::kMillisecond);
 ### Preventing Optimization
 
 To prevent a value or expression from being optimized away by the compiler
-the `benchmark::DoNotOptimize(...)` and `benchmark::ClobberMemory()`
-functions can be used.
+make sure to use it after the benchmark loop
 
-```c++
-static void BM_test(benchmark::State& state) {
-  for (auto _ : state) {
-      int x = 0;
-      for (int i=0; i < 64; ++i) {
-        benchmark::DoNotOptimize(x += i);
-      }
-  }
-}
+```delphi
+procedure DoNotOptimize(i: Integer); // make sure to not use INLINE AUTO
+begin
+end;
+
+procedure BM_test(const state: TState);
+begin
+  for var _  in state do
+  begin
+    int x := 0;
+    for var i := 0 to 63 do
+      Inc(x, i);
+    DoNotOptimize(x);
+  end;
+end;
 ```
-
-`DoNotOptimize(<expr>)` forces the  *result* of `<expr>` to be stored in either
-memory or a register. For GNU based compilers it acts as read/write barrier
-for global memory. More specifically it forces the compiler to flush pending
-writes to memory and reload any other values as necessary.
-
-Note that `DoNotOptimize(<expr>)` does not prevent optimizations on `<expr>`
-in any way. `<expr>` may even be removed entirely when the result is already
-known. For example:
-
-```c++
-  /* Example 1: `<expr>` is removed entirely. */
-  int foo(int x) { return x + 42; }
-  while (...) DoNotOptimize(foo(0)); // Optimized to DoNotOptimize(42);
-
-  /*  Example 2: Result of '<expr>' is only reused */
-  int bar(int) __attribute__((const));
-  while (...) DoNotOptimize(bar(0)); // Optimized to:
-  // int __result__ = bar(0);
-  // while (...) DoNotOptimize(__result__);
-```
-
-The second tool for preventing optimizations is `ClobberMemory()`. In essence
-`ClobberMemory()` forces the compiler to perform all pending writes to global
-memory. Memory managed by block scope objects must be "escaped" using
-`DoNotOptimize(...)` before it can be clobbered. In the below example
-`ClobberMemory()` prevents the call to `v.push_back(42)` from being optimized
-away.
-
-```c++
-static void BM_vector_push_back(benchmark::State& state) {
-  for (auto _ : state) {
-    std::vector<int> v;
-    v.reserve(1);
-    benchmark::DoNotOptimize(v.data()); // Allow v.data() to be clobbered.
-    v.push_back(42);
-    benchmark::ClobberMemory(); // Force 42 to be written to memory.
-  }
-}
-```
-
-Note that `ClobberMemory()` is only available for GNU or MSVC based compilers.
 
 <a name="reporting-statistics" />
 
@@ -819,18 +740,18 @@ The number of runs of each benchmark is specified globally by the
 `Repetitions` on the registered benchmark object. When a benchmark is run more
 than once the mean, median and standard deviation of the runs will be reported.
 
-Additionally the `--benchmark_report_aggregates_only={true|false}`,
-`--benchmark_display_aggregates_only={true|false}` flags or
-`ReportAggregatesOnly(bool)`, `DisplayAggregatesOnly(bool)` functions can be
+Additionally the `--benchmark_report_aggregates_only={True|False}`,
+`--benchmark_display_aggregates_only={True|False}` flags or
+`ReportAggregatesOnly(Boolean)`, `DisplayAggregatesOnly(Bool)` functions can be
 used to change how repeated tests are reported. By default the result of each
-repeated run is reported. When `report aggregates only` option is `true`,
+repeated run is reported. When `report aggregates only` option is `True`,
 only the aggregates (i.e. mean, median and standard deviation, maybe complexity
 measurements if they were requested) of the runs is reported, to both the
 reporters - standard output (console), and the file.
-However when only the `display aggregates only` option is `true`,
+However when only the `display aggregates only` option is `True`,
 only the aggregates are displayed in the standard output, while the file
 output still contains everything.
-Calling `ReportAggregatesOnly(bool)` / `DisplayAggregatesOnly(bool)` on a
+Calling `ReportAggregatesOnly(Boolean)` / `DisplayAggregatesOnly(Boolean)` on a
 registered benchmark object overrides the value of the appropriate flag for that
 benchmark.
 
@@ -844,50 +765,29 @@ observation is, e.g. because you have some real-time constraints. This is easy.
 The following code will specify a custom statistic to be calculated, defined
 by a lambda function.
 
-```c++
-void BM_spin_empty(benchmark::State& state) {
-  for (auto _ : state) {
-    for (int x = 0; x < state.range(0); ++x) {
-      benchmark::DoNotOptimize(x);
-    }
-  }
-}
+```delphi
+procedure BM_spin_empty(const state: TState);
+begin
+  for var _ in state do
+  begin
+    for var x := 0 to state.Range[0] - 1 do
+      DoNotOptimize(x);
+  end;
+end;
 
-BENCHMARK(BM_spin_empty)
-  ->ComputeStatistics("max", [](const std::vector<double>& v) -> double {
-    return *(std::max_element(std::begin(v), std::end(v)));
-  })
-  ->Arg(512);
+  Benchmark(BM_spin_empty, 'spin_empty')
+    .ComputeStatistics('max',
+    function(const values: array of Double): Double
+    begin
+      Result := TEnumerable.From(values).Max;
+    end).Arg(512).Repetitions(10);
 ```
 
 <a name="using-register-benchmark" />
 
 ### Using RegisterBenchmark(name, fn, args...)
 
-The `RegisterBenchmark(name, func, args...)` function provides an alternative
-way to create and register benchmarks.
-`RegisterBenchmark(name, func, args...)` creates, registers, and returns a
-pointer to a new benchmark with the specified `name` that invokes
-`func(st, args...)` where `st` is a `benchmark::State` object.
-
-Unlike the `BENCHMARK` registration macros, which can only be used at the global
-scope, the `RegisterBenchmark` can be called anywhere. This allows for
-benchmark tests to be registered programmatically.
-
-Additionally `RegisterBenchmark` allows any callable object to be registered
-as a benchmark. Including capturing lambdas and function objects.
-
-For Example:
-```c++
-auto BM_test = [](benchmark::State& st, auto Inputs) { /* ... */ };
-
-int main(int argc, char** argv) {
-  for (auto& test_input : { /* ... */ })
-      benchmark::RegisterBenchmark(test_input.name(), BM_test, test_input);
-  benchmark::Initialize(&argc, argv);
-  benchmark::RunSpecifiedBenchmarks();
-}
-```
+Currently not supported in Spring.Benchmark - use `Benchmark()`.
 
 <a name="exiting-with-an-error" />
 
@@ -895,10 +795,10 @@ int main(int argc, char** argv) {
 
 When errors caused by external influences, such as file I/O and network
 communication, occur within a benchmark the
-`State::SkipWithError(const char* msg)` function can be used to skip that run
+`TState.SkipWithError(const msg: string)` function can be used to skip that run
 of benchmark and report the error. Note that only future iterations of the
-`KeepRunning()` are skipped. For the ranged-for version of the benchmark loop
-Users must explicitly exit the loop, otherwise all iterations will be performed.
+`KeepRunning()` are skipped. For the for-in version of the benchmark loop
+Users must explicitly `break` the loop, otherwise all iterations will be performed.
 Users may explicitly return to exit the benchmark immediately.
 
 The `SkipWithError(...)` function may be used at any point within the benchmark,
@@ -908,111 +808,44 @@ from the benchmark function early.
 
 For example:
 
-```c++
-static void BM_test(benchmark::State& state) {
-  auto resource = GetResource();
-  if (!resource.good()) {
-    state.SkipWithError("Resource is not good!");
+```delphi
+procedure void BM_test(const state: TState);
+begin
+  var resource := GetResource();
+  if not resource.isvalid then
+    state.SkipWithError('Resource is not valid!');
     // KeepRunning() loop will not be entered.
-  }
-  while (state.KeepRunning()) {
-    auto data = resource.read_data();
-    if (!resource.good()) {
-      state.SkipWithError("Failed to read data!");
-      break; // Needed to skip the rest of the iteration.
-    }
-    do_stuff(data);
-  }
-}
+  
+  while state.KeepRunning do
+  begin
+    var data = resource.ReadData;
+    if not resource.isvalid then
+    begin
+      state.SkipWithError('Failed to read data!');
+      Break; // Needed to skip the rest of the iteration.
+    end
+    doStuff(data);
+  end;
+end;
 
-static void BM_test_ranged_fo(benchmark::State & state) {
-  auto resource = GetResource();
-  if (!resource.good()) {
-    state.SkipWithError("Resource is not good!");
-    return; // Early return is allowed when SkipWithError() has been used.
-  }
-  for (auto _ : state) {
-    auto data = resource.read_data();
-    if (!resource.good()) {
-      state.SkipWithError("Failed to read data!");
-      break; // REQUIRED to prevent all further iterations.
-    }
-    do_stuff(data);
-  }
-}
-```
-<a name="a-faster-keep-running-loop" />
-
-### A Faster KeepRunning Loop
-
-In C++11 mode, a ranged-based for loop should be used in preference to
-the `KeepRunning` loop for running the benchmarks. For example:
-
-```c++
-static void BM_Fast(benchmark::State &state) {
-  for (auto _ : state) {
-    FastOperation();
-  }
-}
-BENCHMARK(BM_Fast);
-```
-
-The reason the ranged-for loop is faster than using `KeepRunning`, is
-because `KeepRunning` requires a memory load and store of the iteration count
-ever iteration, whereas the ranged-for variant is able to keep the iteration count
-in a register.
-
-For example, an empty inner loop of using the ranged-based for method looks like:
-
-```asm
-# Loop Init
-  mov rbx, qword ptr [r14 + 104]
-  call benchmark::State::StartKeepRunning()
-  test rbx, rbx
-  je .LoopEnd
-.LoopHeader: # =>This Inner Loop Header: Depth=1
-  add rbx, -1
-  jne .LoopHeader
-.LoopEnd:
-```
-
-Compared to an empty `KeepRunning` loop, which looks like:
-
-```asm
-.LoopHeader: # in Loop: Header=BB0_3 Depth=1
-  cmp byte ptr [rbx], 1
-  jne .LoopInit
-.LoopBody: # =>This Inner Loop Header: Depth=1
-  mov rax, qword ptr [rbx + 8]
-  lea rcx, [rax + 1]
-  mov qword ptr [rbx + 8], rcx
-  cmp rax, qword ptr [rbx + 104]
-  jb .LoopHeader
-  jmp .LoopEnd
-.LoopInit:
-  mov rdi, rbx
-  call benchmark::State::StartKeepRunning()
-  jmp .LoopBody
-.LoopEnd:
-```
-
-Unless C++03 compatibility is required, the ranged-for variant of writing
-the benchmark loop should be preferred.
-
-<a name="disabling-cpu-frequency-scaling" />
-
-### Disabling CPU Frequency Scaling
-
-If you see this error:
-
-```
-***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.
-```
-
-you might want to disable the CPU frequency scaling while running the benchmark:
-
-```bash
-sudo cpupower frequency-set --governor performance
-./mybench
-sudo cpupower frequency-set --governor powersave
+procedure BM_test_forin(const state: TState);
+begin
+  var resource = GetResource();
+  if not resource.isvalid then
+  begin
+    state.SkipWithError('Resource is not good!');
+    Exit; // Early return is allowed when SkipWithError() has been used.
+  end;
+  
+  for var _ in state do
+  begin
+    var data := resource.ReadData;
+    if not resource.isvalid then
+    begin
+      state.SkipWithError('Failed to read data!');
+      Break; // REQUIRED to prevent all further iterations.
+    end;
+    doStuff(data);
+  end;
+end;
 ```
