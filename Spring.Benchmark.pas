@@ -254,7 +254,7 @@ type
     destructor Destroy; override;
     procedure Lock;
     procedure Unlock;
-    function StartStopBarrier: Boolean;
+    function StartStopBarrier: Boolean; inline;
     procedure NotifyThreadComplete;
     procedure WaitForAllThreads;
   end;
@@ -325,7 +325,7 @@ type
     // Implementation of KeepRunning() and KeepRunningBatch().
     // isBatch must be true unless n is 1.
     function KeepRunningInternal(const n: TIterationCount; isBatch: Boolean): Boolean; inline;
-    procedure FinishKeepRunning;
+    procedure FinishKeepRunning; {$IFDEF HAS_RECORD_FINALIZER}inline;{$ENDIF}
   private
     // Container for user-defined counters.
     fCounters: TUserCounters;
@@ -3285,7 +3285,11 @@ begin
   if Result then
     Dec(fCached);
 {$ELSE}
+  {$IFDEF CPUX86}
+  if (Int64Rec(fCached).Lo or Int64Rec(fCached).Hi) > 0 then
+  {$ELSE}
   if fCached > 0 then
+  {$ENDIF}
   begin
     Dec(fCached);
     Exit(True);
