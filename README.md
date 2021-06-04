@@ -775,12 +775,12 @@ begin
   end;
 end;
 
-  Benchmark(BM_spin_empty, 'spin_empty')
-    .ComputeStatistics('max',
-    function(const values: array of Double): Double
-    begin
-      Result := TEnumerable.From(values).Max;
-    end).Arg(512).Repetitions(10);
+Benchmark(BM_spin_empty, 'spin_empty')
+  .ComputeStatistics('max',
+  function(const values: array of Double): Double
+  begin
+    Result := TEnumerable.From(values).Max;
+  end).Arg(512).Repetitions(10);
 ```
 
 <a name="using-register-benchmark" />
