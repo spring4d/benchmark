@@ -634,7 +634,7 @@ type
   end;
 
 procedure Benchmark_Main(pinThread0: Boolean = False);
-function Benchmark(const fn: TFunction; const name: string = ''): TBenchmark;
+function Benchmark(const fn: TFunction; const name: string): TBenchmark;
 function Range(const start, limit: Int64): TBenchmark.TRange;
 function Counter(const value: Double; flags: TCounter.TFlags = []; k: TCounter.TOneK = kIs1000): TCounter; inline;
 
