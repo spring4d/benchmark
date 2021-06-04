@@ -22,7 +22,7 @@
 {                                                                           }
 {***************************************************************************}
 
-// This is a port from Google Benchmark: https://github.com/google/benchmark
+// This is a port from Google Benchmark: https://github.com/google/benchmark - v1.5.3
 
 unit Spring.Benchmark;
 
@@ -156,7 +156,7 @@ type
 
   TBigO = (oNone, o1, oN, oNSquared, oNCubed, oLogN, oNLogN, oAuto, oLambda);
 
-  TIterationCount = type UInt64;
+  TIterationCount = type Int64;
 
   TBigOFunc = {$IFNDEF FPC}reference to{$ENDIF} function(const n: TIterationCount): Double;
 
@@ -4263,7 +4263,8 @@ begin
 //            << i.results.real_time_used << "\n";
 
   // So for how long were we running?
-  i.iters := iters;
+  i.iters := i.results.iterations div benchmark.threads;
+
   // Base decisions off of real time if requested by this benchmark.
   i.seconds := i.results.CpuTimeUsed;
   if benchmark.useManualTime then
