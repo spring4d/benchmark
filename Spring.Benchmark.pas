@@ -156,11 +156,11 @@ type
 
   TBigO = (oNone, o1, oN, oNSquared, oNCubed, oLogN, oNLogN, oAuto, oLambda);
 
-  TIterationCount = type Int64;
+  TIterationCount = type UInt64;
 
   TBigOFunc = {$IFNDEF FPC}reference to{$ENDIF} function(const n: TIterationCount): Double;
 
-  TStatisticsFunc = function(const values: array of Double): Double;
+  TStatisticsFunc = {$IFNDEF FPC}reference to{$ENDIF} function(const values: array of Double): Double;
 
   TStatistics = record
     Name: string;
@@ -236,7 +236,7 @@ type
       realTimeUsed: Double;
       cpuTimeUsed: Double;
       manualTimeUsed: Double;
-      complexityN: Int64;
+      complexityN: UInt64;
       reportLabel: string;
       errorMessage: string;
       hasError: Boolean;
@@ -309,14 +309,14 @@ type
     fStarted, fFinished, fErrorOccurred: Boolean;
 
     fRange: TArray<Int64>;
-    fComplexityN: Int64;
+    fComplexityN: UInt64;
     fTimer: TThreadTimer;
     fManager: TThreadManager;
     fThreadIndex: Integer;
     fThreads: Integer;
 
-    function GetBytesProcessed: Int64;
-    function GetItemsProcessed: Int64;
+    function GetBytesProcessed: UInt64;
+    function GetItemsProcessed: UInt64;
     function GetIterations: TIterationCount;
     function GetRange(index: Integer): Int64; inline;
     function GetCounter(const name: string): TCounter;
@@ -431,14 +431,14 @@ type
     // throughput oriented benchmark.
     //
     // REQUIRES: a benchmark has exited its benchmarking loop.
-    procedure SetBytesProcessed(const bytes: Int64);
+    procedure SetBytesProcessed(const bytes: UInt64);
 
     // If this routine is called with complexityN > 0 and complexity report is
     // requested for the
     // family benchmark, then current benchmark will be part of the computation
     // and complexityN will
     // represent the length of N.
-    procedure SetComplexityN(const complexityN: Int64); inline;
+    procedure SetComplexityN(const complexityN: UInt64); inline;
 
     // If this routine is called with items > 0, then an items/s
     // label is printed on the benchmark report line for the currently
@@ -446,7 +446,7 @@ type
     // benchmark where a processing items/second output is desired.
     //
     // REQUIRES: a benchmark has exited its benchmarking loop.
-    procedure SetItemsProcessed(const items: Int64);
+    procedure SetItemsProcessed(const items: UInt64);
 
     // If this routine is called, the specified label is printed at the
     // end of the benchmark report line for the currently executing
@@ -463,9 +463,9 @@ type
     // REQUIRES: a benchmark has exited its benchmarking loop.
     procedure SetLabel(const text: string);
 
-    property BytesProcessed: Int64 read GetBytesProcessed;
-    property ComplexityN: Int64 read fComplexityN;
-    property ItemsProcessed: Int64 read GetItemsProcessed;
+    property BytesProcessed: UInt64 read GetBytesProcessed;
+    property ComplexityN: UInt64 read fComplexityN;
+    property ItemsProcessed: UInt64 read GetItemsProcessed;
     property Iterations: TIterationCount read GetIterations;
 
     property Counters[const name: string]: TCounter read GetCounter write SetCounter;
@@ -794,7 +794,7 @@ type
     repetitions: Integer;
     minTime: Double;
     iterations: TIterationCount;
-    threads: Integer;
+    threads: Cardinal;
 
     function Run(const iters: TIterationCount; threadId: Integer;
       const timer: TThreadTimer; const manager: TThreadManager): TState;
@@ -834,7 +834,7 @@ type
       errorOccurred: Boolean;
       errorMessage: string;
       iterations: TIterationCount;
-      threads: Int64;
+      threads: UInt64;
       repetitionIndex: Int64;
       repetitions: Int64;
       timeUnit: TTimeUnit;
@@ -843,14 +843,14 @@ type
       maxHeapBytesUsed: Double;
       complexity: TBigO;
       complexityLambda: TBigOFunc;
-      complexityN: Int64;
+      complexityN: UInt64;
       statistics: TArray<TStatistics>;
       reportBigO: Boolean;
       reportRms: Boolean;
       counters: TUserCounters;
       hasMemoryResult: Boolean;
       allocsPerIter: Double;
-      maxBytesUsed: Int64;
+      maxBytesUsed: UInt64;
 
       class function Create: TRun; static;
       function GetAdjustedRealTime: Double;
@@ -3055,13 +3055,27 @@ begin
 end;
 
 function TState.GetEnumerator: TStateIterator;
+{$IFDEF CPUX86}
+var
+  errorMask: Integer;
+{$ENDIF}
 begin
+  {$IFDEF CPUX86}
+  Result.fCached := fMaxIterations;
+  errorMask := Integer(fErrorOccurred) - 1;
+  with Int64Rec(Result.fCached) do
+  begin
+    Lo := Lo and errorMask;
+    Hi := Hi and errorMask;
+  end;
+  {$ELSE}
   Result.fCached := fMaxIterations and (Int64(fErrorOccurred) - 1);
+  {$ENDIF}
   Result.fParent := @Self;
   StartKeepRunning;
 end;
 
-function TState.GetBytesProcessed: Int64;
+function TState.GetBytesProcessed: UInt64;
 var
   counter: PCounter;
 begin
@@ -3077,7 +3091,7 @@ begin
   Result := fCounters.Get(name)^;
 end;
 
-function TState.GetItemsProcessed: Int64;
+function TState.GetItemsProcessed: UInt64;
 var
   counter: PCounter;
 begin
@@ -3133,12 +3147,12 @@ begin
     fTimer.StopTimer;
 end;
 
-procedure TState.SetBytesProcessed(const bytes: Int64);
+procedure TState.SetBytesProcessed(const bytes: UInt64);
 begin
   fCounters.Get('bytes_per_second').Init(bytes, [kIsRate], kIs1024);
 end;
 
-procedure TState.SetItemsProcessed(const items: Int64);
+procedure TState.SetItemsProcessed(const items: UInt64);
 begin
   fCounters.Get('items_per_second').Init(items, [kIsRate]);
 end;
@@ -3148,7 +3162,7 @@ begin
   fTimer.SetIterationTime(seconds);
 end;
 
-procedure TState.SetComplexityN(const complexityN: Int64);
+procedure TState.SetComplexityN(const complexityN: UInt64);
 begin
   fComplexityN := complexityN;
 end;
@@ -3247,7 +3261,7 @@ end;
 {$IFDEF FPC}
 class operator TState.TStateIterator.Initialize(var iter: TStateIterator);
 begin
-  iter := Default(TStateIterator);
+  iter.fParent := nil;
 end;
 {$ENDIF}
 
@@ -3263,7 +3277,11 @@ end;
 function TState.TStateIterator.MoveNext: Boolean;
 begin
 {$IFDEF HAS_RECORD_FINALIZER}
+  {$IFDEF CPUX86}
+  Result := (Int64Rec(fCached).Lo or Int64Rec(fCached).Hi) > 0;
+  {$ELSE}
   Result := fCached > 0;
+  {$ENDIF}
   if Result then
     Dec(fCached);
 {$ELSE}
