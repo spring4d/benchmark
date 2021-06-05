@@ -863,6 +863,7 @@ type
     function ReportContext(const context: TContext): Boolean; virtual; abstract;
     procedure ReportRuns(const reports: TArray<TRun>); virtual; abstract;
     procedure PrintBasicContext(var output: System.Text; const context: TContext);
+    procedure Finalize; virtual;
 
     property OutputStream: TStream write fOutputStream;
   end;
@@ -900,6 +901,17 @@ type
   public
     function ReportContext(const context: TBenchmarkReporter.TContext): Boolean; override;
     procedure ReportRuns(const reports: TArray<TBenchmarkReporter.TRun>); override;
+  end;
+
+  TJSONReporter = class(TBenchmarkReporter)
+  private
+    fFirstReport: Boolean;
+    procedure PrintRunData(const run: TBenchmarkReporter.TRun);
+  public
+    constructor Create;
+    function ReportContext(const context: TBenchmarkReporter.TContext): Boolean; override;
+    procedure ReportRuns(const reports: TArray<TBenchmarkReporter.TRun>); override;
+    procedure Finalize; override;
   end;
 
   TBenchmarkRunner = record
@@ -2456,8 +2468,8 @@ function CreateReporter(const name: string;
 begin
   if name = 'console' then
     Result := TConsoleReporter.Create(opts)
-//  } else if (name == "json") {
-//    return PtrType(new JSONReporter);
+  else if name = 'json' then
+    Result := TJSONReporter.Create
   else if name = 'csv' then
     Result := TCSVReporter.Create
   else
@@ -2606,8 +2618,9 @@ begin
     end;
   end;
 
-//  display_reporter->Finalize();
-//  if (file_reporter) file_reporter->Finalize();
+  displayReporter.Finalize;
+  if Assigned(fileReporter) then
+    fileReporter.Finalize;
 //  flushStreams(display_reporter);
 //  flushStreams(file_reporter);
 end;
@@ -3786,6 +3799,10 @@ end;
 
 {$REGION 'TBenchmarkReporter'}
 
+procedure TBenchmarkReporter.Finalize;
+begin
+end;
+
 procedure TBenchmarkReporter.PrintBasicContext(var output: System.Text;
   const context: TContext);
 type
@@ -4164,6 +4181,204 @@ begin
     if counter <> nil then
       fOutputStream.WriteData(counter.value.ToString);
   end;
+  fOutputStream.WriteData(sLineBreak);
+end;
+
+{$ENDREGION}
+
+
+{$REGION 'TJSONReporter'}
+
+function StrEscape(const s: string): string;
+var
+  tmp: string;
+  c: Char;
+begin
+  for c in s do
+    case c of
+       #8: tmp := tmp + '\b';
+      #12: tmp := tmp + '\f';
+      #13: tmp := tmp + '\n';
+      #10: tmp := tmp + '\r';
+       #9: tmp := tmp + '\t';
+      '\': tmp := tmp + '\\';
+      '"': tmp := tmp + '\"';
+    else
+           tmp := tmp + c;
+    end;
+  Result := tmp;
+end;
+
+function FormatKV(const key: string; const value: string): string; overload;
+begin
+  Result := Format('"%s": "%s"', [StrEscape(key), StrEscape(value)]);
+end;
+
+function FormatKV(const key: string; const value: Boolean): string; overload;
+begin
+  Result := Format('"%s": %d', [StrEscape(key), IfThen(value, 'true', 'false')]);
+end;
+
+function FormatKV(const key: string; const value: Int64): string; overload;
+begin
+  Result := Format('"%s": %d', [StrEscape(key), value]);
+end;
+
+function FormatKV(const key: string; const value: Double): string; overload;
+const
+  fmt: TFormatSettings = (DecimalSeparator: '.');
+begin
+  Result := Format('"%s": %s', [StrEscape(key), FloatToStr(value, fmt)]);
+end;
+
+constructor TJSONReporter.Create;
+begin
+  fFirstReport := True;
+end;
+
+function TJSONReporter.ReportContext(
+  const context: TBenchmarkReporter.TContext): Boolean;
+const
+  innerIndent = '  ';
+  cacheIndent = '        ';
+  fmt: TFormatSettings = (DecimalSeparator: '.');
+type
+  info = TCPUInfo;
+var
+  walltimeValue: string;
+  indent: string;
+  i: Integer;
+  ci: TCPUInfo.TCacheInfo;
+begin
+  fOutputStream.WriteData('{' + sLineBreak);
+
+  // Open context block and print context information.
+  fOutputStream.WriteData(innerIndent + '"context": {' + sLineBreak);
+  indent := '    ';
+
+  walltimeValue := LocalDataTimeString;
+  fOutputStream.WriteData(indent + FormatKV('date', walltimeValue) + ',' + sLineBreak);
+
+  if context.executableName <> '' then
+    fOutputStream.WriteData(indent + FormatKV('executable', context.executableName) + ',' + sLineBreak);
+
+  fOutputStream.WriteData(indent + FormatKV('num_cpus', info.numCpus) + ',' + sLineBreak);
+  fOutputStream.WriteData(indent + FormatKV('mhz_per_cpu', Round(info.cyclesPerSecond / 1000000)) + ',' + sLineBreak);
+  if info.scaling <> TCPUInfo.TScaling.Unknown then
+    fOutputStream.WriteData(indent + FormatKV('cpu_scaling_enabled',
+    IfThen(info.scaling <> TCPUInfo.TScaling.Enabled, 'true', 'false')) + ',' + sLineBreak);
+
+  fOutputStream.WriteData(indent + '"caches": [' + sLineBreak);
+  indent := '      ';
+  for i := 0 to High(info.caches) do
+  begin
+    ci := info.caches[i];
+    fOutputStream.WriteData(indent + '{' + sLineBreak);
+    fOutputStream.WriteData(cacheIndent + FormatKV('type', ci.typ) + ',' + sLineBreak);
+    fOutputStream.WriteData(cacheIndent + FormatKV('level', ci.level) + ',' + sLineBreak);
+    fOutputStream.WriteData(cacheIndent + FormatKV('size', ci.size) + ',' + sLineBreak);
+    fOutputStream.WriteData(cacheIndent + FormatKV('num_sharing', ci.numSharing) + sLineBreak);
+    fOutputStream.WriteData(indent + '}');
+    if i < High(info.caches) then
+      fOutputStream.WriteData(',');
+    fOutputStream.WriteData(sLineBreak);
+  end;
+
+  indent := '    ';
+  fOutputStream.WriteData(indent + '],' + sLineBreak);
+  fOutputStream.WriteData(indent + '"load_avg": [');
+  for i := 0 to High(info.loadAvg) do
+  begin
+    fOutputStream.WriteData(FloatToStr(info.loadAvg[i], fmt));
+    if i < High(info.loadAvg) then
+      fOutputStream.WriteData(',');
+  end;
+  fOutputStream.WriteData('],' + sLineBreak);
+
+  fOutputStream.WriteData(indent + FormatKV('library_build_type', {$IFDEF DEBUG}'debug'{$ELSE}'release'{$ENDIF}) + sLineBreak);
+  fOutputStream.WriteData(innerIndent + '},' + sLineBreak);
+  fOutputStream.WriteData(innerIndent + '"benchmarks": [' + sLineBreak);
+  Result := True;
+end;
+
+procedure TJSONReporter.ReportRuns(
+  const reports: TArray<TBenchmarkReporter.TRun>);
+const
+  indent = '    ';
+var
+  i: Integer;
+begin
+  if reports = nil then
+    Exit;
+
+  if not fFirstReport then
+    fOutputStream.WriteData(',' + sLineBreak);
+  fFirstReport := False;
+
+  for i := 0 to High(reports) do
+  begin
+    fOutputStream.WriteData(indent + '{' + sLineBreak);
+    PrintRunData(reports[i]);
+    fOutputStream.WriteData(indent + '}');
+    if i < High(reports) then
+      fOutputStream.WriteData(',' + sLineBreak);
+  end;
+end;
+
+procedure TJSONReporter.Finalize;
+begin
+  fOutputStream.WriteData(sLineBreak + '  ]' + sLineBreak + '}' + sLineBreak);
+end;
+
+procedure TJSONReporter.PrintRunData(const run: TBenchmarkReporter.TRun);
+const
+  runTypeName: array[TRun.TRunType] of string = ('iteration', 'aggregate');
+var
+  indent: string;
+  i: Integer;
+begin
+  indent := '      ';
+  fOutputStream.WriteData(indent + FormatKV('name', run.BenchmarkName) + ',' + sLineBreak);
+  fOutputStream.WriteData(indent + FormatKV('run_name', run.runName.Str) + ',' + sLineBreak);
+  fOutputStream.WriteData(indent + FormatKV('run_type', runTypeName[run.runType]) + ',' + sLineBreak);
+  fOutputStream.WriteData(indent + FormatKV('repetitions', run.repetitions) + ',' + sLineBreak);
+  if run.runType <> TRun.TRunType.rtAggregate then
+    fOutputStream.WriteData(indent + FormatKV('repetition_index', run.repetitionIndex) + ',' + sLineBreak);
+  fOutputStream.WriteData(indent + FormatKV('threads', run.threads) + ',' + sLineBreak);
+  if run.runType = TRun.TRunType.rtAggregate then
+    fOutputStream.WriteData(indent + FormatKV('aggregate_name', run.aggregateName) + ',' + sLineBreak);
+  if run.errorOccurred then
+  begin
+    fOutputStream.WriteData(indent + FormatKV('error_occured', run.errorOccurred) + ',' + sLineBreak);
+    fOutputStream.WriteData(indent + FormatKV('error_message', run.errorMessage) + ',' + sLineBreak);
+  end;
+  if not run.reportBigO and not run.reportRms then
+  begin
+    fOutputStream.WriteData(indent + FormatKV('iterations', run.iterations) + ',' + sLineBreak);
+    fOutputStream.WriteData(indent + FormatKV('real_time', run.GetAdjustedRealTime) + ',' + sLineBreak);
+    fOutputStream.WriteData(indent + FormatKV('cpu_time', run.GetAdjustedCPUTime) + ',' + sLineBreak);
+    fOutputStream.WriteData(indent + FormatKV('time_unit', GetTimeUnitString(run.timeUnit)));
+  end else if run.reportBigO then
+  begin
+    fOutputStream.WriteData(indent + FormatKV('cpu_coefficient', run.GetAdjustedCPUTime) + ',' + sLineBreak);
+    fOutputStream.WriteData(indent + FormatKV('real_coefficient', run.GetAdjustedRealTime) + ',' + sLineBreak);
+    fOutputStream.WriteData(indent + FormatKV('big_o', GetBigOString(run.complexity)) + ',' + sLineBreak);
+    fOutputStream.WriteData(indent + FormatKV('time_unit', GetTimeUnitString(run.timeUnit)));
+  end else if run.reportRms then
+    fOutputStream.WriteData(indent + FormatKV('rms', run.GetAdjustedCPUTime));
+
+  for i := 0 to High(run.counters) do
+    fOutputStream.WriteData(',' + sLineBreak + indent + FormatKV(run.counters[i].name, run.counters[i].counter.value));
+
+  if run.hasMemoryResult then
+  begin
+    fOutputStream.WriteData(',' + sLineBreak + indent + FormatKV('allocs_per_iter', run.allocsPerIter));
+    fOutputStream.WriteData(',' + sLineBreak + indent + FormatKV('max_bytes_used', run.maxBytesUsed));
+  end;
+
+  if run.reportLabel <> '' then
+    fOutputStream.WriteData(',' + sLineBreak + indent + FormatKV('label', run.reportLabel));
+
   fOutputStream.WriteData(sLineBreak);
 end;
 
