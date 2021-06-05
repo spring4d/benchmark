@@ -47,6 +47,18 @@ unit Spring.Benchmark;
   {$IF CompilerVersion >= 34.0}
     {$DEFINE HAS_RECORD_FINALIZER}
   {$IFEND}
+  {$IFDEF ANDROID}
+    {$DEFINE APP_LOG}
+    {$DEFINE DELPHI_ANDROID}
+  {$ENDIF}
+  {$IFDEF IOS}
+    {$DEFINE APP_LOG}
+    {$DEFINE DELPHI_DARWIN}
+  {$ENDIF}
+  {$IFDEF OSX}
+    {$DEFINE APP_LOG}
+    {$DEFINE DELPHI_DARWIN}
+  {$ENDIF}
 {$ENDIF}
 
 interface
@@ -713,10 +725,31 @@ uses
   Winapi.ShLwApi,
   Winapi.Windows,
 {$ELSE}
+  Posix.Base,
   Posix.Stdlib,
   Posix.SysTime,
   Posix.Time,
   Posix.Unistd,
+  Posix.Fcntl,
+  Posix.SysSysctl,
+  Posix.StdDef,
+{$IFDEF ANDROID}
+  Androidapi.JNI.JavaTypes,
+  Androidapi.Helpers,
+  Androidapi.Log,
+{$ENDIF}
+{$IFDEF IOS}
+  Macapi.Mach,
+  Macapi.Helpers,
+  Macapi.ObjectiveC,
+  iOSapi.Foundation,
+{$ENDIF}
+{$IFDEF OSX}
+  Macapi.Mach,
+  Macapi.Helpers,
+  Macapi.ObjectiveC,
+  Macapi.Foundation,
+{$ENDIF}
 {$ENDIF}
   System.Classes,
   System.Character,
@@ -1050,6 +1083,11 @@ function AtomicDecrement(var target: Integer): Integer; external name 'FPC_INTER
 
 {$REGION 'Colored and formatted output for console'}
 
+{$IFDEF APP_LOG}
+var
+  writeCache: string;
+{$ENDIF}
+
 // ported from: colorprint.h
 
 type
@@ -1109,6 +1147,14 @@ begin
     SetConsoleTextAttribute(stdOutHandle, oldColorAttributes);
 end;
 {$ELSE}
+{$IFDEF APP_LOG}
+var
+  s: string;
+begin
+  s :=  Format(msg, args);
+  writeCache := writeCache + s;
+end;
+{$ELSE}
 var
   colorCode: string;
 begin
@@ -1118,7 +1164,7 @@ begin
   System.Write(Format(msg, args) + #27'[m');
 end;
 {$ENDIF}
-
+{$ENDIF}
 
 procedure Write(const msg: string; color: TColor = clWhite); inline; overload;
 begin
@@ -1128,11 +1174,29 @@ end;
 procedure WriteLine(const msg: string; const args: array of const; color: TColor = clWhite); overload;
 begin
   Write(msg + sLineBreak, args, color);
+{$IFDEF APP_LOG}
+{$IFDEF DELPHI_ANDROID}
+  LOGI(PUtf8Char(Utf8String(writeCache)));
+{$ENDIF}
+{$IFDEF DELPHI_DARWIN}
+  NSLog(StringToID(writeCache));
+{$ENDIF}
+  writeCache := '';
+{$ENDIF}
 end;
 
 procedure WriteLine(const msg: string = ''; color: TColor = clWhite); inline; overload;
 begin
   Write(msg + sLineBreak, [], color);
+{$IFDEF APP_LOG}
+{$IFDEF DELPHI_ANDROID}
+  LOGI(PUtf8Char(Utf8String(writeCache)));
+{$ENDIF}
+{$IFDEF DELPHI_DARWIN}
+  NSLog(StringToID(writeCache));
+{$ENDIF}
+  writeCache := '';
+{$ENDIF}
 end;
 
 {$ENDREGION}
@@ -1578,6 +1642,25 @@ end;
 
 // ported from: timers.cc and timers.h
 
+{$IFDEF DELPHI_DARWIN}
+type
+  clockid_t = clock_res_t;
+
+function clock_gettime(clk_id: clockid_t; ts: Ptimespec): Integer; cdecl;
+  external libc name _PU + 'clock_gettime';
+{$EXTERNALSYM clock_gettime}
+
+const
+  CLOCK_REALTIME = 0;
+  CLOCK_MONOTONIC_RAW = 4;
+  CLOCK_MONOTONIC_RAW_APPROX = 5;
+  CLOCK_MONOTONIC = 6;
+  CLOCK_UPTIME_RAW = 8;
+  CLOCK_UPTIME_RAW_APPROX = 9;
+  CLOCK_PROCESS_CPUTIME_ID = 12;
+  CLOCK_THREAD_CPUTIME_ID = 16;
+{$ENDIF}
+
 {$IFDEF MSWINDOWS}
 function MakeTime(const kernelTime: TFileTime; const userTime: TFileTime): Double;
 var
@@ -1687,6 +1770,51 @@ end;
 
 // ported from: sysinfo.cc
 
+{$IFNDEF MSWINDOWS}
+function GetSystemInfo(const fileName: string): string;
+const
+  bufferSize = 1024;
+var
+  f: Integer;
+  buffer: array[1..bufferSize] of AnsiChar;
+  bytesRead: Integer;
+  s: AnsiString;
+begin
+  Result := '';
+  f := __open(PUtf8Char(Utf8String(fileName)), O_RDONLY, 0);
+  if f = -1 then
+    Exit;
+
+  repeat
+    bytesRead := __read(f, @buffer[1], Length(buffer));
+    if bytesRead > 0 then
+    begin
+      s := buffer;
+      SetLength(s, bytesRead);
+      Result := Result + string(s);
+    end;
+  until bytesRead < bufferSize;
+  __close(f);
+  Result := Trim(Result);
+end;
+
+function GetSystemInfoByName(const fileName: string; const name: string): string;
+var
+  s: string;
+begin
+  for s in GetSystemInfo(fileName).Split([#10, #13]) do
+    if s.StartsWith(name, True) then
+      Exit(Trim(Copy(s, Pos(':', s) + 1)));
+  Result := '';
+end;
+
+function GetCPUFreq(const fileName: string): Double;
+begin
+  // frequencies are in kHz
+  Result := StrToFloatDef(GetSystemInfo(fileName), 0) * 1000;
+end;
+{$ENDIF}
+
 function GetNumCPUs: Integer;
 {$IFDEF MSWINDOWS}
 var
@@ -1738,9 +1866,23 @@ begin
   Result := Result * WaitFactor;
 end;
 {$ELSE}
+{$IFDEF DELPHI_DARWIN}
+var
+  freq: uint64_t;
+  size: size_t;
 begin
   Result := 0;
+  size := SizeOf(freq);
+  if sysctlbyname('hw.cpufrequency', @freq, @size, nil, 0) = 0 then
+    Result := freq;
 end;
+{$ELSE}
+begin
+  Result := GetCPUFreq('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq');
+  if Result = 0 then
+    Result := StrToFloatDef(GetSystemInfoByName('/proc/cpuinfo', 'CPU MHz'), 0) * 1000000;
+end;
+{$ENDIF}
 {$ENDIF}
 
 function GetCacheSizes: TArray<TCPUInfo.TCacheInfo>;
@@ -1804,11 +1946,53 @@ begin
   Result := res;
 end;
 {$ELSE}
+{$IFDEF DELPHI_DARWIN}
+type
+  TCacheType = record
+    name: AnsiString;
+    typ: string;
+    level: Integer;
+  end;
+const
+  CacheTypes: array[0..3] of TCacheType = (
+    (name: 'hw.l1dcachesize'; typ: 'Data'; level: 1),
+    (name: 'hw.l1icachesize'; typ: 'Instruction'; level: 1),
+    (name: 'hw.l2cachesize'; typ: 'Unified'; level: 2),
+    (name: 'hw.l3cachesize'; typ: 'Unified'; level: 3));
+var
+  res: TArray<TCPUInfo.TCacheInfo>;
+  size: size_t;
+  cacheCounts: TArray<UInt64>;
+  val: Int64;
+  cache: TCacheType;
+  c: TCPUInfo.TCacheInfo;
+begin
+  size := 0;
+  if sysctlbyname('hw.cacheconfig', nil, @size, nil, 0) = 0 then
+  begin
+    SetLength(cacheCounts, size div 8);
+    if sysctlbyname('hw.cacheconfig', @cacheCounts[0], @size, nil, 0) = 0 then
+      for cache in CacheTypes do
+      begin
+        size := SizeOf(val);
+        if sysctlbyname(PAnsiChar(cache.name), @val, @size, nil, 0) = 0 then
+        begin
+          c.typ := cache.typ;
+          c.level := cache.level;
+          c.size := val;
+          c.numSharing := cacheCounts[cache.level];
+          res := res + [c];
+        end;
+      end;
+  end;
+  Result := res;
+end;
+{$ELSE}
 begin
   Result := nil;
 end;
 {$ENDIF}
-
+{$ENDIF}
 
 {$ENDREGION}
 
