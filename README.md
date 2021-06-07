@@ -7,9 +7,6 @@ Hello everyone - you are amongst the few selected people to get a preview to hel
 The goal of this project is to provide a powerful benchmarking library for Delphi developers and stay as close as possible to its origin.
 That means I will be reluctant to add a lot of features but aim at making work what works with its origin.
 
-This readme is WIP - most features are implemented and working - currently missing:
-
-- file output (csv done, json missing)
 
 The content of the README is mostly copied from the Google Benchmark project with some first modifications to show the correct Syntax in Delphi.
 
