@@ -2532,6 +2532,7 @@ function GetOutputOptions(const forceNoColor: Boolean = False): TConsoleReporter
     else
       Result := IsTruthyFlagValue(benchmark_color);
   end;
+
 begin
   Result := TConsoleReporter.ooDefaults;
   if IsBenchmarkColor then
@@ -3978,6 +3979,15 @@ begin
 end;
 
 procedure TConsoleReporter.PrintRunData(const result: TBenchmarkReporter.TRun);
+
+  function GetColor(const color: TColor): TColor;
+  begin
+    if ooColor in fOutputOptions then
+      Result := color
+    else
+      Result := clDefault;
+  end
+
 const
   oneKValues: array[TCounter.TOneK] of Double = (1000, 1024);
 var
@@ -3992,11 +4002,11 @@ begin
     nameColor := clBlue
   else
     nameColor := clGreen;
-  Write('%-*s ', [fNameFieldWidth, result.BenchmarkName], nameColor);
+  Write('%-*s ', [fNameFieldWidth, result.BenchmarkName], GetColor(nameColor));
 
   if result.errorOccurred then
   begin
-    WriteLine('ERROR OCCURRED: ''%s''', [result.errorMessage], clRed);
+    WriteLine('ERROR OCCURRED: ''%s''', [result.errorMessage], GetColor(clRed));
     Exit;
   end;
 
@@ -4008,17 +4018,17 @@ begin
   if result.reportBigO then
   begin
     bigO := GetBigOString(result.complexity);
-    Write('%10.2f %-4s %10.2f %-4s ', [realTime, bigO, cpuTime, bigO], clYellow);
+    Write('%10.2f %-4s %10.2f %-4s ', [realTime, bigO, cpuTime, bigO], GetColor(clYellow));
   end else if result.reportRms then
-    Write('%10.0f %-4s %10.0f %-4s ', [realTime * 100, '%', cpuTime * 100, '%'], clYellow)
+    Write('%10.0f %-4s %10.0f %-4s ', [realTime * 100, '%', cpuTime * 100, '%'], GetColor(clYellow))
   else
   begin
     timeLabel := GetTimeUnitString(result.timeUnit);
-    Write('%s %-4s %s %-4s ', [realTimeStr, timeLabel, cpuTimeStr, timeLabel], clYellow);
+    Write('%s %-4s %s %-4s ', [realTimeStr, timeLabel, cpuTimeStr, timeLabel], GetColor(clYellow));
   end;
 
   if not result.reportBigO and not result.reportRms then
-    Write('%10d', [result.iterations], clCyan);
+    Write('%10d', [result.iterations], GetColor(clCyan));
 
   for i := 0 to High(result.counters) do
   begin
