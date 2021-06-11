@@ -1755,9 +1755,13 @@ function GetCacheSizes: TArray<TCPUInfo.TCacheInfo>;
   {$IF not declared(System.CountPopulation32)}
   function CountPopulation32(x: Cardinal): Integer; inline;
   begin
+    {$IFOPT R+}{$R-}{$DEFINE RANGECHECKS_ON}{$ENDIF}
+    {$IFOPT Q+}{$Q-}{$DEFINE OVERFLOWCHECKS_ON}{$ENDIF}
     x := x - ((x shr 1) and $55555555);
     x := ((x shr 2) and $33333333) + (x and $33333333);
     Result := ((((x shr 4) + x) and $0F0F0F0F) * $01010101) shr 24;
+    {$IFDEF OVERFLOWCHECKS_ON}{$Q+}{$ENDIF}
+    {$IFDEF RANGECHECKS_ON}{$R+}{$ENDIF}
   end;
   {$IFEND}
   {$ENDIF}
