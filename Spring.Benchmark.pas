@@ -741,8 +741,8 @@ type
   type
     TCacheInfo = record
       typ: string;
-      level: Integer;
-      size: Integer;
+      level: Cardinal;
+      size: Cardinal;
       numSharing: Integer;
     end;
     TScaling = (Unknown, Enabled, Disabled);
