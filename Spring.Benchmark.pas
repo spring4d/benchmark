@@ -3985,8 +3985,8 @@ procedure TConsoleReporter.PrintRunData(const result: TBenchmarkReporter.TRun);
     if ooColor in fOutputOptions then
       Result := color
     else
-      Result := clDefault;
-  end
+      Result := clWhite;
+  end;
 
 const
   oneKValues: array[TCounter.TOneK] of Double = (1000, 1024);
