@@ -2,23 +2,6 @@
 
 Delphi port of [Google Benchmark](https://github.com/google/benchmark) - v1.5.3
 
-Hello everyone - you are amongst the few selected people to get a preview to help test things out and give some feedback, welcome!
-
-The goal of this project is to provide a powerful benchmarking library for Delphi developers and stay as close as possible to its origin.
-That means I will be reluctant to add a lot of features but aim at making work what works with its origin.
-
-
-The content of the README is mostly copied from the Google Benchmark project with some first modifications to show the correct Syntax in Delphi.
-
-I developed and tested with Delphi 10.4.2 but I am aiming to target XE7 and higher. The syntax for the benchmark code is using inline variables.
-If on an older version the loop variable needs to be of type `TState.TValue`. I tested on Windows 10 but it should run on all Windows versions Delphi supports. At some point I might add Linux support. Not sure about other platforms though.
-
-I added support for FPC - tested with whatever FPC version comes with Lazarus 2.0.12 on Windows though - support for other platforms missing. I guess Linux will be interesting, not sure about others.
-
-Please feel free to open issues for questions or bugs you encounter. Happy benchmarking!
-
-
-
 A library to benchmark code snippets, similar to unit tests. Example:
 
 ```delphi
@@ -48,6 +31,7 @@ To get started, simply add `Spring.Benchmark` to the uses.
 ## Requirements
 
 The library can be used with Delphi XE7 or higher and FPC 3.2.0 or higher.
+Currently it runs on Windows (Delphi and FPC) and on Linux (Delphi) but support for more platforms is in the works.
 
 ## Installation
 
@@ -102,7 +86,7 @@ Actually there is no installation. Simply add the unit to the uses clause and yo
 
 The library supports multiple output formats. Use the
 `--benchmark_format=<console|json|csv>` flag (or set the
-`BENCHMARK_FORMAT=<console|json|csv>` environment variable) to set
+`BENCHMARK_FORMAT=<console|json|csv>` global variable) to set
 the format type. `console` is the default format.
 
 The Console format is intended to be a human readable format. By default
@@ -187,8 +171,8 @@ Specifying `--benchmark_out` does not suppress the console output.
 
 Benchmarks are executed by running the produced binaries. Benchmarks binaries,
 by default, accept options that may be specified either through their command
-line interface or by setting environment variables before execution. For every
-`--option_flag=<value>` CLI switch, a corresponding environment variable
+line interface or by setting global variables before execution. For every
+`--option_flag=<value>` CLI switch, a corresponding global variable
 `option_flag=<value>` exist and is used as default if set (CLI switches always
  prevails). A complete list of CLI options is available running benchmarks
  with the `--help` switch.
@@ -198,7 +182,7 @@ line interface or by setting environment variables before execution. For every
 ### Running a Subset of Benchmarks
 
 The `--benchmark_filter=<regex>` option (or `benchmark_filter=<regex>`
-environment variable) can be used to only run the benchmarks that match
+global variable) can be used to only run the benchmarks that match
 the specified `<regex>`. For example:
 
 ```bash
@@ -568,8 +552,6 @@ Note above the additional header printed when the benchmark changes from
 not have the same counter set as ``BM_UserCounter``.
 
 <a name="multithreaded-benchmarks"/>
-
-# TBD / needs translation
 
 ### Multithreaded Benchmarks
 
