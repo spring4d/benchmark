@@ -30,7 +30,7 @@ To get started, simply add `Spring.Benchmark` to the uses.
 
 ## Requirements
 
-The library can be used with Delphi XE7 or higher and FPC 3.2.0 or higher.
+The library can be used with Delphi XE7 or higher and FPC 3.2.0 or higher.    
 Currently it runs on Windows (Delphi and FPC) and on Linux (Delphi) but support for more platforms is in the works.
 
 ## Installation
