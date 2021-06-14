@@ -1988,8 +1988,68 @@ begin
   Result := res;
 end;
 {$ELSE}
+
+  function CountBits(const part: string): Integer;
+  var
+    i, n: Integer;
+  begin
+    Result := 0;
+    n := Length(part);
+    for i := n downto 1 do
+      if part[i] = '1' then
+        Result := Result + (1 shl (n - i));
+  end;
+
+  function CountSetBitsInCPUMap(value: string): Integer;
+  var
+    i: Integer;
+  begin
+    Result := 0;
+    repeat
+      i := Pos(',', value);
+      if i = 0 then
+      begin
+        Result := Result + CountBits(value);
+        Break;
+      end;
+      Result := Result + CountBits(Copy(value, 1, i - 1));
+      value := Copy(value, i + 1);
+    until False;
+  end;
+
+const
+  dir = '/sys/devices/system/cpu/cpu0/cache/';
+var
+  res: TArray<TCPUInfo.TCacheInfo>;
+  path, s: string;
+  idx: Integer;
+  info: TCPUInfo.TCacheInfo;
 begin
-  Result := nil;
+  idx := 0;
+  repeat
+    path := dir + 'index' + idx.ToString + '/';
+    Inc(idx);
+    s := GetSystemInfo(path + 'size');
+    if s = '' then Break;
+
+    if s.EndsWith('K') then
+    begin
+      info.size := StrToIntDef(Copy(s, 1, Length(s)-1), 0);
+      info.size := info.size * 1024;
+    end
+    else
+      info.size := StrToIntDef(s, 0);
+    s := GetSystemInfo(path + 'type');
+    info.typ := s;
+    s := GetSystemInfo(path + 'level');
+    info.level := StrToIntDef(s, 0);
+    s := GetSystemInfo(path + 'shared_cpu_map');
+    info.numSharing := CountSetBitsInCPUMap(s);
+
+    res := res + [info];
+  until False;
+
+  Result := res;
 end;
 {$ENDIF}
 {$ENDIF}
