@@ -1673,7 +1673,7 @@ begin
   Result := (kernel.QuadPart + user.QuadPart) * 1e-7;
 end;
 {$ELSE}
-function MakeTime(const ts: timespec): Double;
+function MakeTime(const ts: timespec): Double; inline;
 begin
   Result := ts.tv_sec + (ts.tv_nsec * 1e-9);
 end;
@@ -1727,19 +1727,19 @@ end;
 
 type
   TClock = record
+    {$IFDEF MSWINDOWS}
     class var freq: Int64;
     class constructor Create;
+    {$ENDIF}
     class function Now: Double; static; inline;
   end;
 
+{$IFDEF MSWINDOWS}
 class constructor TClock.Create;
 begin
-{$IFDEF MSWINDOWS}
   QueryPerformanceFrequency(freq);
-{$ELSE}
-  freq := 10000000;
-{$ENDIF}
 end;
+{$ENDIF}
 
 class function TClock.Now: Double;
 {$IFDEF MSWINDOWS}
@@ -1754,7 +1754,7 @@ var
   res: timespec;
 begin
   clock_gettime(CLOCK_MONOTONIC, @res);
-  Result := (Int64(1000000000) * res.tv_sec + res.tv_nsec) div 100 div freq;
+  Result := MakeTime(res);
 end;
 {$ENDIF}
 
