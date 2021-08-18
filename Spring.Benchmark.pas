@@ -3602,7 +3602,7 @@ function TBenchmark.Range(const start, limit: Int64): TBenchmark;
 var
   argList: TArray<Int64>;
   arg: TArray<Int64>;
-  i: Integer;
+  i: Int64;
 begin
   Assert((ArgsCount = -1) or (ArgsCount = 1));
   AddRange(arglist, start, limit, fRangeMultiplier);
