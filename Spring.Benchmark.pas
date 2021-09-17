@@ -4321,8 +4321,16 @@ end;
 
 type
   TStreamHelper = class helper for TStream
+    procedure WriteBOM;
     function WriteData(const Buffer: string): NativeInt; overload;
   end;
+
+procedure TStreamHelper.WriteBOM;
+const
+  BOM: Word = $FEFF;
+begin
+  Write(BOM, 2);
+end;
 
 function TStreamHelper.WriteData(const Buffer: string): NativeInt;
 begin
@@ -4345,6 +4353,8 @@ begin
           Continue;
         fUserCounterNames := fUserCounterNames + [reports[i].counters[k].name];
       end;
+
+    fOutputStream.WriteBOM;
 
     // print the header
     for i := 0 to High(elements) do
@@ -4508,6 +4518,7 @@ var
   i: Integer;
   ci: TCPUInfo.TCacheInfo;
 begin
+  fOutputStream.WriteBOM;
   fOutputStream.WriteData('{' + sLineBreak);
 
   // Open context block and print context information.
