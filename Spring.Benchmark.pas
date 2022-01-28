@@ -4400,6 +4400,8 @@ begin
 end;
 
 procedure TCSVReporter.PrintRunData(const run: TBenchmarkReporter.TRun);
+const
+  fmt: TFormatSettings = (DecimalSeparator: '.');
 var
   counter: PCounter;
   i: Integer;
@@ -4419,8 +4421,8 @@ begin
     fOutputStream.WriteData(IntToStr(run.iterations));
   fOutputStream.WriteData(csv_separator);
 
-  fOutputStream.WriteData(run.GetAdjustedRealTime.ToString + csv_separator);
-  fOutputStream.WriteData(run.GetAdjustedCPUTime.ToString + csv_separator);
+  fOutputStream.WriteData(run.GetAdjustedRealTime.ToString(fmt) + csv_separator);
+  fOutputStream.WriteData(run.GetAdjustedCPUTime.ToString(fmt) + csv_separator);
 
   // Do not print timeLabel on bigO and RMS report
   if run.reportBigO then
@@ -4431,11 +4433,11 @@ begin
 
   counter := run.counters.Find('bytes_per_second');
   if counter <> nil then
-    fOutputStream.WriteData(counter.value.ToString);
+    fOutputStream.WriteData(counter.value.ToString(fmt));
   fOutputStream.WriteData(csv_separator);
   counter := run.counters.Find('items_per_second');
   if counter <> nil then
-    fOutputStream.WriteData(counter.value.ToString);
+    fOutputStream.WriteData(counter.value.ToString(fmt));
   fOutputStream.WriteData(csv_separator);
   if run.reportLabel <> '' then
     fOutputStream.WriteData(run.reportLabel);
@@ -4447,7 +4449,7 @@ begin
     counter := run.counters.Find(fUserCounterNames[i]);
     fOutputStream.WriteData(csv_separator);
     if counter <> nil then
-      fOutputStream.WriteData(counter.value.ToString);
+      fOutputStream.WriteData(counter.value.ToString(fmt));
   end;
   fOutputStream.WriteData(sLineBreak);
 end;
