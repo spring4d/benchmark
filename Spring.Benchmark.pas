@@ -1020,7 +1020,7 @@ type
   PSystemLogicalProcessorInformation = ^TSystemLogicalProcessorInformation;
 
 function GetLogicalProcessorInformation(Buffer: PSystemLogicalProcessorInformation;
-  var ReturnedLength: DWORD): BOOL; external kernel32 name 'GetLogicalProcessorInformation';
+  var ReturnedLength: DWORD): BOOL; stdcall; external kernel32 name 'GetLogicalProcessorInformation';
 
 procedure WakeAllConditionVariable(var ConditionVariable: TRTLConditionVariable); stdcall;
   external kernel32 name 'WakeAllConditionVariable';
