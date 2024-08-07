@@ -709,6 +709,10 @@ var
   // Valid values: 'true'/'yes'/1, 'false'/'no'/0.  Defaults to false.
   benchmark_counters_tabular: Boolean = False;
 
+  // Whether to add formatted args to the output.
+  // Valid values: 'true'/'yes'/1, 'false'/'no'/0.  Defaults to true.
+  benchmark_format_args: Boolean = True;
+
   // The level of verbose logging to output
   log_level: Integer = 0;
 
@@ -1350,6 +1354,7 @@ begin
           '          [--benchmark_out_format=<json|console|csv>]' + sLineBreak +
           '          [--benchmark_color={auto|true|false}]' + sLineBreak +
           '          [--benchmark_counters_tabular={true|false}]' + sLineBreak +
+          '          [--benchmark_format_args={true|false}]' + sLineBreak +
           '          [--log_level=<verbosity>]');
   Halt(0);
 end;
@@ -1383,6 +1388,8 @@ begin
         ParseStringFlag(arg, 'benchmark_color', benchmark_color) or
         ParseBoolFlag(arg, 'benchmark_counters_tabular',
                             benchmark_counters_tabular) or
+        ParseBoolFlag(arg, 'benchmark_format_args',
+                            benchmark_format_args) or
         ParseInt32Flag(arg, 'log_level', log_level)) then
       if IsFlag(arg, 'help') then
         PrintUsageAndExit
@@ -4001,6 +4008,7 @@ begin
 
         // Add arguments to instance name
         i := 0;
+        if benchmark_format_args then
         for arg in args do
         begin
           if instance.name.args <> '' then
@@ -4017,12 +4025,15 @@ begin
           Inc(i);
         end;
 
+        if benchmark_format_args then
+        begin
           if not IsZero(family.fMinTime) then
             instance.name.minTime := Format('minTime:%0.3f', [family.fMinTime]);
           if family.fIterations <> 0 then
             instance.name.iterations := Format('iterations:%u', [family.fIterations]);
           if family.fRepetitions <> 0 then
             instance.name.pepetitions := Format('repeats:%d', [family.fRepetitions]);
+        end;
 
         if family.fMeasureProcessCpuTime then
           instance.name.timeType := 'processTime';
