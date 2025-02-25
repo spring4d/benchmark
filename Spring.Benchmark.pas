@@ -4433,8 +4433,8 @@ begin
   fOutputStream.WriteData(CsvEscape(run.BenchmarkName) + csv_separator);
   if run.errorOccurred then
   begin
-    fOutputStream.WriteData((Length(elements) - 3).ToString + csv_separator);
-    fOutputStream.WriteData('true,');
+    fOutputStream.WriteData(DupeString(csv_separator, Length(elements) - 3));
+    fOutputStream.WriteData('true' + csv_separator);
     fOutputStream.WriteData(CsvEscape(run.errorMessage));
     fOutputStream.WriteData(sLineBreak);
     Exit;
