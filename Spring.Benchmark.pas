@@ -4307,7 +4307,9 @@ begin
       if kInvert in result.counters[i].counter.flags then
         u := 's'
       else
-        u := '/s';
+        u := '/s'
+    else
+      u := '';
     if ooTabular in fOutputOptions then
       Write(' %*s%s', [nameLen - Length(u), s, u])
     else
