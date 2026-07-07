@@ -719,6 +719,9 @@ var
   // separator used for the csv file
   csv_separator: Char = ';';
 
+  // Whether parameter parsing allows any custom parameters
+  benchmark_strict_parameters: Boolean = True;
+
 {$ENDREGION}
 
 implementation
@@ -1393,9 +1396,9 @@ begin
         ParseInt32Flag(arg, 'log_level', log_level)) then
       if IsFlag(arg, 'help') then
         PrintUsageAndExit
-      else
+      else if benchmark_strict_parameters then
       begin
-        WriteLine('error: unrecognozed command-line flag: ' + arg);
+        WriteLine('error: unrecognized command-line flag: ' + arg);
         Halt(1);
       end;
   end;
