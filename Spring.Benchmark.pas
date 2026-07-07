@@ -807,7 +807,7 @@ type
     args: string;
     minTime: string;
     iterations: string;
-    pepetitions: string;
+    repetitions: string;
     timeType: string;
     threads: string;
 
@@ -3882,7 +3882,7 @@ function TBenchmarkName.Str: string;
   end;
 
 begin
-  Result := join('/', [functionName, args, minTime, iterations, pepetitions, timeType, threads]);
+  Result := join('/', [functionName, args, minTime, iterations, repetitions, timeType, threads]);
 end;
 
 {$ENDREGION}
@@ -4032,7 +4032,7 @@ begin
           if family.fIterations <> 0 then
             instance.name.iterations := Format('iterations:%u', [family.fIterations]);
           if family.fRepetitions <> 0 then
-            instance.name.pepetitions := Format('repeats:%d', [family.fRepetitions]);
+            instance.name.repetitions := Format('repeats:%d', [family.fRepetitions]);
         end;
 
         if family.fMeasureProcessCpuTime then
