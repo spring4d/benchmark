@@ -4320,7 +4320,7 @@ begin
   end;
 
   if result.reportLabel <> '' then
-    Write(result.reportLabel);
+    Write(' %s', [result.reportLabel]);
 
   WriteLine;
 end;
